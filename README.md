@@ -102,7 +102,10 @@ flashport/
 
 ---
 
-## Quick Start
+## Quick Start (After Cloning)
+
+> **Note:** The AI models and sample documents are not included in the repo (too large).
+> Run the generation scripts below first — they take about 3 minutes total.
 
 ### Prerequisites
 
@@ -112,28 +115,36 @@ flashport/
 - Python 3.11+
 - Tesseract OCR (`brew install tesseract`)
 
-### Database Setup (first time only)
+### Step 1 — Database Setup
 
 ```bash
-# Create user and database
 psql postgres -c "CREATE USER flashport WITH PASSWORD 'flashport';"
 psql postgres -c "CREATE DATABASE flashport OWNER flashport;"
-
-# Run schema
 psql -U flashport -d flashport -f docker/postgres/init.sql
 ```
 
-### Backend
+### Step 2 — Backend + Generate AI Models
 
 ```bash
 cd backend
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # edit DATABASE_URL, TESSERACT_CMD as needed
-uvicorn app.main:app --reload --port 8000
+python -m spacy download en_core_web_sm
+
+# Generate training data and train both AI models (~2 min)
+python scripts/generate_training_data.py
+python scripts/train_risk_model.py
+python scripts/generate_ner_training.py
+python scripts/train_ner_model.py
+
+# Generate sample documents — 100 PDFs + 100 PNGs per type (~3 min, optional)
+python scripts/generate_sample_docs.py
+
+# Start the backend
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Web Dashboard
+### Step 3 — Web Dashboard
 
 ```bash
 cd web
@@ -144,13 +155,24 @@ npm run dev
 
 **Manager login:** `manager` / `flashport2026`
 
-### Mobile
+### Step 4 — Mobile
 
 ```bash
 cd mobile
 flutter pub get
 flutter run
 ```
+
+**Mobile operator logins:**
+
+| Employee ID | PIN |
+|---|---|
+| CDP-001 | 1234 |
+| CDP-002 | 5678 |
+| CDP-003 | 9012 |
+
+> **Physical device:** In the app login screen, set Server URL to `http://[YOUR-MAC-IP]:8000`
+> Find your IP with: `ipconfig getifaddr en0`
 
 Services:
 - Backend API: `http://localhost:8000`
@@ -241,13 +263,16 @@ Full interactive docs: `http://localhost:8000/docs`
 | Component | Technology |
 |---|---|
 | Mobile | Flutter 3.x + Dart |
-| Mobile OCR | Tesseract (backend only — no on-device OCR) |
+| Mobile OCR | None — all OCR runs on backend (Tesseract) |
 | Backend | Python 3.11 + FastAPI |
-| OCR Engine | Tesseract `eng+ind` |
-| Preprocessing | OpenCV + pdf2image + poppler |
-| Field Extraction | Python Regex |
-| Risk Scoring | Rule-based scorer (XGBoost in Phase 2) |
-| Database | PostgreSQL 15 |
-| Web Frontend | React 18 + Tailwind CSS 3 |
-| Push Notifications | Firebase Cloud Messaging (FCM HTTP v1) |
-| Auth | JWT (python-jose) + API Key |
+| PDF text extraction | pypdf — reads digital PDFs directly, no OCR needed |
+| OCR engine | Tesseract `eng+ind` — for photo/scanned documents |
+| Image preprocessing | OpenCV — smart pipeline (grayscale only for clean images) |
+| Field extraction Stage 1 | spaCy NER (custom trained, 100% F1, English + Indonesian) |
+| Field extraction Stage 2 | Python Regex — fallback + table-merge OCR patterns |
+| Risk scoring | XGBoost (300 trees, 89.5% CV accuracy) |
+| Explainability | SHAP TreeExplainer — per-feature contribution bar chart |
+| Database | PostgreSQL 15 (local install) |
+| Web frontend | React 18 + Tailwind CSS 3 |
+| Push notifications | Firebase Cloud Messaging FCM HTTP v1 |
+| Auth | JWT HS256 + API Key |
