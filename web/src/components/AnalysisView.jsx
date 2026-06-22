@@ -23,9 +23,9 @@ const FIELD_LABELS = {
 export function AnalysisView({ declarations }) {
   const data = useMemo(() => {
     const riskBuckets = [
-      { label: "0–29 (Hijau)", min: 0, max: 29, colour: "bg-emerald-500", textColour: "text-emerald-400", count: 0 },
-      { label: "30–69 (Kuning)", min: 30, max: 69, colour: "bg-yellow-500", textColour: "text-yellow-400", count: 0 },
-      { label: "70–100 (Merah)", min: 70, max: 100, colour: "bg-red-500", textColour: "text-red-400", count: 0 },
+      { label: "0–29 (Green)", min: 0, max: 29, colour: "bg-emerald-500", textColour: "text-emerald-400", count: 0 },
+      { label: "30–69 (Yellow)", min: 30, max: 69, colour: "bg-yellow-500", textColour: "text-yellow-400", count: 0 },
+      { label: "70–100 (Red)", min: 70, max: 100, colour: "bg-red-500", textColour: "text-red-400", count: 0 },
     ];
     const flaggedFreq = {};
     const riskByDoc = {};

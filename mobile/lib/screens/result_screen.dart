@@ -15,9 +15,9 @@ class ResultScreen extends StatelessWidget {
     final fields = response['extracted_fields'] as Map<String, dynamic>? ?? {};
 
     final (badgeColour, badgeLabel, badgeIcon) = switch (riskBadge) {
-      'green' => (Colors.green, 'Low Risk — Jalur Hijau', Icons.check_circle),
-      'red' => (Colors.red, 'High Risk — Jalur Merah', Icons.warning_rounded),
-      _ => (Colors.orange, 'Medium Risk — Jalur Kuning', Icons.info_rounded),
+      'green' => (Colors.green, 'Low Risk — Green Lane', Icons.check_circle),
+      'red' => (Colors.red, 'High Risk — Red Lane', Icons.warning_rounded),
+      _ => (Colors.orange, 'Medium Risk — Yellow Lane', Icons.info_rounded),
     };
 
     return Scaffold(

@@ -1,0 +1,53 @@
+{
+  "features": [
+    "has_hs_code",
+    "has_invoice_value",
+    "has_container_id",
+    "has_importer",
+    "has_exporter",
+    "has_vessel",
+    "has_port",
+    "missing_field_count",
+    "confidence_score",
+    "document_type_enc",
+    "is_restricted_hs",
+    "invoice_value_log",
+    "is_high_value",
+    "is_very_high_value",
+    "high_value_no_container",
+    "hs_high_scrutiny"
+  ],
+  "jalur_map": {
+    "0": "green",
+    "1": "yellow",
+    "2": "red"
+  },
+  "cv_accuracy_mean": 0.8950000000000001,
+  "cv_accuracy_std": 0.03858612300930072,
+  "n_training_records": 600,
+  "label_distribution": {
+    "green": 395,
+    "yellow": 127,
+    "red": 78
+  },
+  "feature_importance": {
+    "is_restricted_hs": 0.3654801845550537,
+    "hs_high_scrutiny": 0.10698416829109192,
+    "missing_field_count": 0.08042888343334198,
+    "has_port": 0.060010429471731186,
+    "has_container_id": 0.04607444629073143,
+    "high_value_no_container": 0.04552726447582245,
+    "has_hs_code": 0.04540035128593445,
+    "has_vessel": 0.040416933596134186,
+    "invoice_value_log": 0.04004288837313652,
+    "has_importer": 0.03326106444001198,
+    "confidence_score": 0.02844899706542492,
+    "is_very_high_value": 0.026655452325940132,
+    "has_exporter": 0.0234592966735363,
+    "is_high_value": 0.02240777015686035,
+    "document_type_enc": 0.018175499513745308,
+    "has_invoice_value": 0.017226390540599823
+  },
+  "trained_at": "2026-06-22T17:34:08.172488Z",
+  "note": "Trained on synthetic Cikarang Dry Port data. Retrain with real CEISA rejection data after August company visit."
+}

@@ -1,9 +1,9 @@
 import { useState } from "react";
 
 const JALUR_CONFIG = {
-  hijau: { label: "Jalur Hijau", colour: "text-emerald-400", bg: "bg-emerald-900/30 border-emerald-700", icon: "✅" },
-  kuning: { label: "Jalur Kuning", colour: "text-yellow-400", bg: "bg-yellow-900/30 border-yellow-700", icon: "⚠️" },
-  merah: { label: "Jalur Merah", colour: "text-red-400", bg: "bg-red-900/30 border-red-700", icon: "🔴" },
+  hijau: { label: "Green Lane", colour: "text-emerald-400", bg: "bg-emerald-900/30 border-emerald-700", icon: "✅" },
+  kuning: { label: "Yellow Lane", colour: "text-yellow-400", bg: "bg-yellow-900/30 border-yellow-700", icon: "⚠️" },
+  merah: { label: "Red Lane", colour: "text-red-400", bg: "bg-red-900/30 border-red-700", icon: "🔴" },
 };
 
 export function CeisaModal({ declarationId, onClose, onSubmit }) {
@@ -33,7 +33,7 @@ export function CeisaModal({ declarationId, onClose, onSubmit }) {
         {!result ? (
           <>
             <p className="text-sm text-gray-400">
-              Declaration will be submitted to the CEISA gateway. A Jalur (channel) response will be returned immediately.
+              Declaration will be submitted to the CEISA gateway. A Lane (Green / Yellow / Red) response will be returned immediately.
             </p>
             <button
               onClick={handleSubmit}

@@ -2,12 +2,15 @@
 
 This file gives Claude Code the full context needed to work on FlashPort without rederiving it from scratch.
 
+---
+
 ## Project Identity
 
-FlashPort is an AI-powered customs declaration automation platform built for the AI Open Innovation Challenge 2026 (Case 1 — Cikarang Dry Port). It is a monorepo with three independent deployable services.
+FlashPort is an AI-powered customs declaration automation platform built for the AI Open Innovation Challenge 2026 (Case 1 — Cikarang Dry Port). It is a monorepo with three independent services.
 
-**Hard deadline:** 30 June 2026 — video demo submission.
-**Final deadline:** 31 August 2026 — full working prototype.
+**Final deadline:** 31 August 2026 — full working prototype with live CEISA integration.
+
+**Team:** Teknik Logistik, President University
 
 ---
 
@@ -15,11 +18,11 @@ FlashPort is an AI-powered customs declaration automation platform built for the
 
 ```
 flashport/
-├── mobile/       Flutter app — offline-first field scanning
-├── backend/      FastAPI Python server — OCR, extraction, scoring
-├── web/          React dashboard — manager review and CEISA submission
-├── docker/       postgres init.sql, nginx config
-└── docker-compose.yml
+├── mobile/       Flutter app — offline-first document scanning
+├── backend/      FastAPI Python server — all business logic
+├── web/          React 18 admin dashboard
+├── docker/       postgres init.sql
+└── docker-compose.yml   (not used — PostgreSQL runs locally)
 ```
 
 ---
@@ -27,37 +30,63 @@ flashport/
 ## Architecture Rules
 
 ### Mobile (Flutter)
-- Offline-first. The app must work with zero network connectivity.
-- ML Kit OCR is for **operator preview only** — not the data source of truth.
-- Data saved locally as `customs_data.json` in SQLite/Hive with `status: pending_sync`.
-- Images compressed to ~200–400KB before upload.
-- Background sync fires the moment `connectivity_plus` detects network.
-- Push notifications via Firebase Cloud Messaging (FCM).
+- No on-device OCR. `ocr_service.dart` deleted. Backend Tesseract is the only OCR engine.
+- Offline flow: take photo / attach file → save as pending in SQLite → sync when connected.
+- Online flow: take photo / attach file → confirm → backend OCR → result screen.
+- FCM push notifications sent when manager approves/rejects or CEISA result arrives.
+- Scan tile shows a 4-step status timeline: Scanned → Synced → Reviewed → Approved/Rejected.
 
 ### Backend (FastAPI)
-- Tesseract OCR (`eng+ind`) is the **source of truth** for all field extraction.
-- Parallel comparison: ML Kit text vs Tesseract text → confidence score.
-- Three confidence levels: High (auto-process), Medium (flag for review), Low (hold).
-- Regex extraction gates:
-  - HS Code: 8-digit `XXXX.XX.XX`
-  - Invoice Value: currency symbol + numeric
-  - Container ID: `ABCD1234567`
-  - Importer/Exporter: registered entity name
-- XGBoost risk scorer: 0–100% (mock random until August training sprint).
-- All records persisted to PostgreSQL with `confidence_badge` + `risk_badge`.
-- WebSocket endpoint pushes new records to the React dashboard in real time.
+- Tesseract OCR (`eng+ind`) is the only OCR engine — source of truth for all extraction.
+- `compute_confidence()` always receives empty `ml_kit_text` → returns `(0.85, "high")`.
+- Risk scorer applies: baseline rules + manager-configured DB rules + watchlist hits.
+- Every action (scan, approve, reject, CEISA submit, reprocess) is logged to `audit_logs`.
+- Watchlist check runs on every sync — auto-elevates risk if importer/exporter matched.
+- Document image (`image_b64`) is stored in `declarations.image_data` for web viewing.
 
 ### Web Dashboard (React + Tailwind)
-- Split-screen: field data left, AI analysis right.
-- Records arrive live via WebSocket with two badges per record.
-- Manager can edit any field inline before submission.
-- Submit button → mock CEISA gateway → Jalur response displayed.
-- Risk badge colours: green < 30%, yellow 30–70%, red > 70%.
+- Left sidebar navigation with two groups: Main and Operations.
+- `StatsBar` always shows: Total / Pending / Approved / Rejected / CEISA Ready.
+- Declarations shown as a table with batch checkboxes, filter tabs, and search.
+- Click a row → right-side `DetailPanel` slides in: image + fields + approve/reject + CEISA.
+- All text is English — no Bahasa Indonesia anywhere in the UI.
 
-### Mock CEISA Gateway (FastAPI `/ceisa/submit`)
-- No real CEISA credentials in Phase 1. Use the mock until August.
-- Jalur logic: risk < 30 → Hijau, 30–70 → Kuning, > 70 → Merah.
-- Returns realistic JSON matching the real CEISA H2H API response shape.
+---
+
+## Running the Project
+
+### PostgreSQL (local, no Docker)
+```bash
+# Already set up — flashport DB exists at localhost:5432
+# User: flashport / flashport
+# To re-init schema: psql -U flashport -d flashport -f docker/postgres/init.sql
+```
+
+### Backend
+```bash
+cd backend
+source venv/bin/activate
+uvicorn app.main:app --reload
+```
+
+### Web
+```bash
+cd web
+npm run dev    # http://localhost:3000 (or 3001 if 3000 is taken)
+```
+
+**Manager login:** `manager` / `flashport2026`
+
+### Mobile
+```bash
+cd mobile
+flutter run
+```
+
+### Tests
+```bash
+cd backend && pytest   # 12/12 passing
+```
 
 ---
 
@@ -66,121 +95,231 @@ flashport/
 | Layer | Tech | Notes |
 |---|---|---|
 | Mobile | Flutter 3.x + Dart | `mobile/` |
-| Mobile OCR | **STUBBED** — Google ML Kit v2 | Removed: no arm64 iOS 26 simulator slice. Returns `''`. Restore when Google ships XCFramework. |
+| Mobile OCR | **REMOVED** | No on-device OCR. Backend Tesseract only. |
 | Backend | Python 3.11 + FastAPI | `backend/` |
-| Backend OCR | Tesseract `eng+ind` | Source of truth. Must install system binary. |
-| Preprocessing | OpenCV (Python) | grayscale → threshold → deskew. PDF → image via `pdf2image` + `poppler-utils`. |
-| Field Extraction | Python Regex | Strict patterns per field type |
-| Risk Scoring | Rule-based scorer | Mock only. Replace with XGBoost after August company visit data. |
-| Database | PostgreSQL 15 | Via Docker |
-| Web | React 18 + Tailwind CSS 3 | `web/` — Live Feed, Dashboard, Analysis views |
-| Infra | Docker Compose | Local dev + CI |
+| Backend OCR | Tesseract `eng+ind` | Source of truth. `/opt/homebrew/bin/tesseract` |
+| Preprocessing | OpenCV | grayscale → threshold → deskew. PDF → image via pdf2image |
+| Field Extraction | spaCy NER (deep learning) + Regex fallback | NER is primary, regex fills gaps. Model: `models/ner_model/` |
+| Risk Scoring | XGBoost + SHAP explainability | `models/risk_model.xgb`. SHAP returned in every sync response. |
+| Database | PostgreSQL 15 | Local install (no Docker) |
+| Web | React 18 + Tailwind CSS 3 | `web/` |
+| Auth | JWT (HS256) + API Key | 8h token expiry. Manager = JWT. Mobile = API Key. |
+| Push | Firebase FCM HTTP v1 | Approve/reject + CEISA result notifications |
 
 ---
 
 ## Environment Variables
 
-Backend `.env` (copy from `.env.example`):
+`backend/.env`:
 ```
 DATABASE_URL=postgresql://flashport:flashport@localhost:5432/flashport
-TESSERACT_CMD=/usr/bin/tesseract
+TESSERACT_CMD=/opt/homebrew/bin/tesseract
+SECRET_KEY=changeme-use-a-long-random-string-in-production
+API_KEY=changeme
+MANAGER_USERNAME=manager
+MANAGER_PASSWORD=flashport2026
 FCM_SERVER_KEY=
-SECRET_KEY=changeme
+FCM_PROJECT_ID=flashport-9870d
+FCM_SERVICE_ACCOUNT_JSON=
+CORS_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:5173
 ```
 
 ---
 
-## Key Commands
+## Full API Reference (38 routes)
 
-```bash
-# Full stack
-docker-compose up --build
+| Method | Path | Description |
+|---|---|---|
+| POST | `/auth/login` | Manager JWT login |
+| POST | `/auth/operator/login` | Operator PIN login (mobile) |
+| POST | `/sync` | Mobile document sync — OCR, extract, score, store |
+| POST | `/ocr/preview` | Quick OCR preview (optional pre-save check) |
+| GET | `/declarations` | List all declarations with review_status |
+| GET | `/declarations/{id}/image` | Fetch stored base64 document image |
+| PATCH | `/declarations/{id}/field` | Edit an extracted field |
+| PATCH | `/declarations/{id}/review` | Approve / reject with note + FCM push |
+| POST | `/declarations/{id}/reprocess` | Re-run Tesseract OCR on stored image |
+| POST | `/ceisa/submit` | Submit declaration to CEISA (single) |
+| POST | `/ceisa/batch-submit` | Submit multiple declarations at once |
+| GET | `/ceisa/submissions` | List all CEISA submissions |
+| GET | `/operators` | List all field operators |
+| POST | `/operators` | Add new operator |
+| PATCH | `/operators/{employee_id}` | Update operator (name, active status) |
+| POST | `/operators/{employee_id}/reset-pin` | Reset operator PIN |
+| DELETE | `/operators/{employee_id}` | Deactivate operator |
+| GET | `/watchlist` | List active watchlist entries |
+| POST | `/watchlist` | Add importer/exporter/HS code to watchlist |
+| DELETE | `/watchlist/{id}` | Remove watchlist entry |
+| GET | `/watchlist/check` | Check if entity is on watchlist |
+| GET | `/risk-rules` | List all custom risk rules |
+| POST | `/risk-rules` | Create a risk rule |
+| PATCH | `/risk-rules/{id}` | Update/toggle a rule |
+| DELETE | `/risk-rules/{id}` | Delete a rule |
+| GET | `/hs-codes` | List HS code reference entries |
+| GET | `/hs-codes/validate/{code}` | Validate an HS code |
+| POST | `/hs-codes` | Add HS code to reference |
+| DELETE | `/hs-codes/{code}` | Remove HS code from reference |
+| GET | `/sla` | SLA metrics (avg review time, overdue, throughput) |
+| GET | `/audit` | Audit log (filter by entity_id, entity_type) |
+| GET | `/export/declarations.csv` | CSV export with optional filters |
+| GET | `/ws` | WebSocket — live declaration feed |
+| GET | `/health` | Health check |
 
-# Backend only
-cd backend && uvicorn app.main:app --reload
+---
 
-# Web only
-cd web && npm run dev
+## Database Schema
 
-# Flutter
-cd mobile && flutter run
+### Core Tables
+- `declarations` — main record: OCR text, extracted fields summary, risk/confidence badges, `review_status`, `image_data`, `reviewed_by`
+- `declaration_fields` — extracted key-value pairs linked to declaration
+- `ceisa_submissions` — CEISA submission attempts and lane responses
+- `sync_logs` — mobile sync events
 
-# Run backend tests
-cd backend && pytest
+### New Tables (2026-06-22)
+- `audit_logs` — action, entity_type, entity_id, performed_by, detail, created_at
+- `watchlist` — entity_type (importer/exporter/hs_code), value, reason, is_active
+- `risk_rules` — field, condition, value, risk_boost, flag_label, is_active
+- `hs_code_reference` — code, description, category, is_restricted, restriction_note
+- `operators` — employee_id, name, pin_hash, is_active
 
-# Lint backend
-cd backend && ruff check .
+### Declaration review_status enum
+`pending` → `approved` or `rejected` (manager can reset to `pending`)
+
+---
+
+## Backend Models
+
+```
+backend/app/models/
+├── declaration.py    Declaration, DeclarationField, CeisaSubmission, SyncLog
+│                     Enums: ConfidenceLevel, RiskLevel, ReviewStatus, JalurType, DocType
+├── operator.py       Operator
+├── audit.py          AuditLog
+├── watchlist.py      WatchlistEntry
+├── risk_rule.py      RiskRule
+└── hs_code.py        HsCodeReference
 ```
 
 ---
 
-## Data Contract — `customs_data.json`
+## Web Components
 
-This is the payload mobile sends to the backend on sync:
+```
+web/src/
+├── App.jsx                  Shell: sidebar + header + routing + detail panel
+├── components/
+│   ├── Sidebar.jsx          Fixed left nav — Main group + Operations group
+│   ├── StatsBar.jsx         5 KPI cards always visible (Total/Pending/Approved/Rejected/CEISA)
+│   ├── DeclarationTable.jsx Table with checkboxes, filter tabs, search
+│   ├── DetailPanel.jsx      Right slide-in: image + fields + approve/reject + CEISA + re-OCR
+│   ├── DashboardView.jsx    Overview: Pending/Approved/Rejected KPIs + charts + recent activity
+│   ├── AnalysisView.jsx     Risk distribution, flagged fields, doc type breakdown
+│   ├── CeisaView.jsx        CEISA Portal — submission history with lane badges
+│   ├── CeisaModal.jsx       Submit modal — shows lane result
+│   ├── OperatorsView.jsx    Operator CRUD table + PIN reset
+│   ├── WatchlistView.jsx    Add/remove watchlist entries
+│   ├── RiskRulesView.jsx    Configure custom scoring rules
+│   ├── SLAView.jsx          SLA metrics — daily throughput + overdue list
+│   ├── AuditView.jsx        Full audit trail with colour-coded event types
+│   ├── FieldEditor.jsx      Inline field editing inside detail panel
+│   ├── RiskBadge.jsx        Green/Yellow/Red lane badge
+│   ├── ConfidenceBadge.jsx  High/Medium/Low OCR confidence badge
+│   ├── LoginPage.jsx        Manager login form
+│   └── Toast.jsx            Notification toasts
+└── hooks/
+    ├── useAuth.js            JWT auth with localStorage + expiry check
+    ├── useDeclarations.js    Declarations state + WebSocket + updateField + reviewDeclaration
+    ├── useAPI.js             Generic get/post/patch/del/download helper
+    └── useCeisaSubmissions.js CEISA submissions fetch
+```
 
+---
+
+## Mobile Screens & Services
+
+```
+mobile/lib/
+├── screens/
+│   ├── home_screen.dart      Scan list + logout + pending badge
+│   ├── camera_screen.dart    Camera / file picker → PreviewScreen
+│   ├── preview_screen.dart   Image + doc type + Confirm & Save
+│   ├── result_screen.dart    Risk card + fields + Green/Yellow/Red lane
+│   └── login_screen.dart     Operator employee ID + PIN login
+├── services/
+│   ├── sync_service.dart     Save to SQLite + upload to backend + FCM token
+│   ├── database_service.dart SQLite CRUD for scan_records
+│   ├── operator_service.dart Login, logout, employee ID, JWT token
+│   └── backend_config.dart   Server URL (editable in login screen)
+├── models/
+│   └── scan_record.dart      ScanRecord, SyncStatus, DocumentType
+└── widgets/
+    └── scan_tile.dart        Scan list item + status timeline (Scanned→Synced→Reviewed→Approved/Rejected)
+```
+
+---
+
+## Data Contract
+
+### Mobile → Backend (`POST /sync`)
 ```json
 {
   "scan_id": "uuid-v4",
-  "scanned_at": "2026-06-18T10:00:00Z",
+  "scanned_at": "2026-06-22T10:00:00Z",
   "document_type": "commercial_invoice | bill_of_lading | packing_list",
-  "operator_id": "string",
-  "ml_kit_text": "raw OCR text from ML Kit",
-  "image_b64": "base64-encoded compressed image ~200-400KB",
-  "device_id": "string"
+  "operator_id": "CDP-001",
+  "fcm_token": "firebase-token",
+  "ml_kit_text": "",
+  "image_b64": "base64-encoded-compressed-image"
 }
 ```
 
-Backend response after processing:
-
+### Backend → Mobile (sync response)
 ```json
 {
-  "declaration_id": "uuid-v4",
+  "declaration_id": "uuid",
   "confidence_badge": "high | medium | low",
   "risk_score": 42,
   "risk_badge": "green | yellow | red",
-  "extracted_fields": {
-    "hs_code": "8471.30.00",
-    "invoice_value": "USD 12,500.00",
-    "container_id": "TCKU1234567",
-    "importer": "PT Maju Jaya",
-    "exporter": "Samsung Electronics Co.",
-    "net_weight": "450 KG",
-    "gross_weight": "520 KG",
-    "vessel_name": "MV Pacific Star",
-    "port_of_origin": "Busan, Korea"
-  },
-  "flagged_fields": [],
+  "extracted_fields": { "hs_code": "...", "invoice_value": "...", ... },
+  "flagged_fields": ["missing:hs_code"],
   "ceisa_ready": true
 }
 ```
 
 ---
 
-## PostgreSQL Schema (Key Tables)
+## Risk Scoring Logic
 
-- `declarations` — main record table, one row per document scan
-- `declaration_fields` — extracted key-value pairs linked to declaration
-- `sync_logs` — mobile sync events, timestamps, payload sizes
-- `ceisa_submissions` — submission attempts and Jalur responses
+1. **Baseline rules** — missing critical fields (+20 each), low OCR confidence (+15), missing HS code (+10), high value without container (+15), missing importer (+10)
+2. **HS code category** — known high-scrutiny prefixes add +10
+3. **Watchlist hits** — importer or exporter on watchlist adds +25 per hit
+4. **Manager-configured DB rules** — any active `risk_rules` rows applied (field/condition/value/boost)
+5. Score capped at 100. Badge: green < 30, yellow 30–70, red > 70.
+
+---
+
+## Audit Actions
+
+| Action | Trigger |
+|---|---|
+| `declaration.created` | Every mobile sync |
+| `declaration.approved` | Manager approves |
+| `declaration.rejected` | Manager rejects |
+| `declaration.pending` | Manager resets to pending |
+| `declaration.reprocessed` | Manager triggers re-OCR |
+| `ceisa.submitted` | Single or batch CEISA submit |
 
 ---
 
 ## What NOT to Do
 
-- Do not use YOLO v8 or Gemini Vision API in the current build — those are in the proposal but not in the System Breakdown which is the authoritative implementation plan.
+- Do not add on-device OCR. `ocr_service.dart` has been deleted. All OCR is Tesseract on the backend.
+- Do not use YOLO v8 or Gemini Vision — not in the System Breakdown (proposal only).
 - Do not call any paid external APIs. Stack is 100% free/open-source.
 - Do not hardcode credentials. Use `.env` files.
-- Do not re-add `google_mlkit_text_recognition` to `pubspec.yaml` until Google ships a proper XCFramework with arm64 simulator slices. The current stub (`lib/services/ocr_service.dart` returns `''`) is intentional — `compute_confidence()` handles this by returning `(0.85, "high")` when `ml_kit_text` is empty.
-- The XGBoost model does not need real training data until August. Keep the rule-based `risk_scorer.py` mock until then.
-
----
-
-## Competition Context
-
-- **Challenge:** AI Open Innovation Challenge 2026, Case 1 — Cikarang Dry Port
-- **Team:** Teknik Logistik, President University
-- **Phase 1 goal:** Demo video showing scan → OCR → risk score → mock CEISA Jalur response (deadline: 30 June 2026)
-- **Phase 2 goal:** Live CEISA H2H integration, XGBoost risk scorer trained on real data from company visit (July 27–31 2026), final prototype (deadline: 31 August 2026)
+- Do not use Docker for the database — PostgreSQL runs locally.
+- The XGBoost model does not need real training data until August. Keep the rule-based scorer.
+- Do not re-add `google_mlkit_text_recognition` to `pubspec.yaml`.
 
 ---
 
@@ -188,69 +327,41 @@ Backend response after processing:
 
 | Secret | Value | Where |
 |---|---|---|
-| Web dashboard login | `manager` / `flashport2026` | `backend/.env` — `MANAGER_USERNAME` / `MANAGER_PASSWORD` |
-| Backend API key (mobile auth) | `changeme` (change in prod) | `backend/.env` — `API_KEY` |
-| JWT secret | `changeme` (change in prod) | `backend/.env` — `SECRET_KEY` |
+| Web dashboard login | `manager` / `flashport2026` | `backend/.env` |
+| Backend API key (mobile) | `changeme` (change in prod) | `backend/.env` |
+| JWT secret | `changeme-use-a-long-random-string-in-production` | `backend/.env` |
 | Firebase Android config | placed | `mobile/android/app/google-services.json` |
 | Firebase iOS config | placed | `mobile/ios/Runner/GoogleService-Info.plist` |
-| FCM service account JSON | **not yet downloaded** | `backend/.env` — `FCM_SERVICE_ACCOUNT_JSON=/path/to/file.json` |
-
-To change the manager password: edit `MANAGER_PASSWORD=` in `backend/.env`.
+| FCM service account JSON | **not yet downloaded** | `backend/.env` → `FCM_SERVICE_ACCOUNT_JSON=` |
 
 ---
 
-## Current Implementation Status (as of 2026-06-20)
+## Seeded Data
 
-### ✅ Completed — Phase 1
+**Operators** (seeded on first backend start):
+- CDP-001 / Ahmad Fauzi / PIN: 1234
+- CDP-002 / Budi Santoso / PIN: 5678
+- CDP-003 / Citra Dewi / PIN: 9012
 
-| Item | Files |
-|---|---|
-| iOS 26 simulator fix — removed MLKit, EXCLUDED_ARCHS override | `mobile/pubspec.yaml`, `mobile/ios/Podfile`, `mobile/ios/Runner.xcodeproj/project.pbxproj`, `mobile/lib/services/ocr_service.dart` |
-| Confidence scoring fix — empty ml_kit_text → (0.85, "high") | `backend/app/services/ocr.py` |
-| PDF upload support — mobile picks PDF files, backend converts via pdf2image | `mobile/pubspec.yaml`, `mobile/lib/screens/camera_screen.dart`, `mobile/lib/services/sync_service.dart`, `backend/app/services/preprocessing.py`, `backend/requirements.txt`, `backend/Dockerfile` |
-| Multi-page PDF OCR — all pages concatenated, not just page 1 | `backend/app/services/preprocessing.py` (`decode_pdf_pages`, `is_pdf`), `backend/app/api/sync.py` |
-| Web dashboard — Live Feed + Dashboard + Analysis + Portal CEISA tabs | `web/src/App.jsx`, `web/src/components/` |
-| Portal CEISA tab — government-portal UI, lists all submissions with Jalur badges | `web/src/components/CeisaView.jsx`, `web/src/hooks/useCeisaSubmissions.js`, `backend/app/api/ceisa.py` (`GET /ceisa/submissions`) |
-| Manager login — JWT auth, LoginPage, logout button, 8h token expiry | `backend/app/api/auth.py`, `web/src/hooks/useAuth.js`, `web/src/components/LoginPage.jsx` |
-| API Key auth — middleware accepts X-API-Key (mobile) OR Bearer JWT (web) | `backend/app/main.py`, `backend/app/config.py` |
-| Firebase config files placed — both platforms launch without crash | `mobile/android/app/google-services.json`, `mobile/ios/Runner/GoogleService-Info.plist` |
-| Firebase options generated — `DefaultFirebaseOptions.currentPlatform` wired | `mobile/lib/firebase_options.dart`, `mobile/lib/main.dart` |
-| FCM push notification — backend sends push to operator after CEISA result | `backend/app/services/fcm.py`, `backend/app/api/ceisa.py`, `mobile/lib/services/sync_service.dart` (sends `fcm_token` on sync) |
-| Operator ID — SharedPreferences-backed name, dialog in HomeScreen, sent on sync | `mobile/lib/services/operator_service.dart`, `mobile/lib/screens/home_screen.dart` |
-| Android permissions — INTERNET, CAMERA, storage (scoped + legacy), POST_NOTIFICATIONS | `mobile/android/app/src/main/AndroidManifest.xml` |
-| Android Firebase Gradle plugin wired — google-services v4.4.2 | `mobile/android/settings.gradle.kts`, `mobile/android/app/build.gradle.kts` |
-| Preview screen — shows document type, OCR info, Save & Sync flow | `mobile/lib/screens/preview_screen.dart` |
-| Result screen — risk card, confidence badge, CEISA-ready badge, extracted fields, flagged issues | `mobile/lib/screens/result_screen.dart` |
-
-### ⏳ One Manual Step Remaining (to activate FCM)
-Download Firebase service account JSON and set path in `.env`:
-1. Firebase console → Project Settings → Service Accounts → **Generate new private key**
-2. Save file on server
-3. Add to `backend/.env`: `FCM_SERVICE_ACCOUNT_JSON=/path/to/flashport-service-account.json`
-
-Without this, backend logs a warning and continues — push notifications are silently skipped, everything else works.
+**HS Code Reference** (10 codes seeded):
+- Electronics (8471, 8517, 8542) — not restricted
+- Weapons (9301, 9302) — restricted, require Ministry of Defense permit
+- Chemicals (2710, 2711) — restricted, require energy ministry approval
+- Textiles, Food & Beverage — not restricted
 
 ---
 
-## Remaining Work
+## Remaining Work (Phase 2 — August 2026)
 
-### Phase 2 — Before 31 August 2026 (final prototype)
+1. **Real CEISA H2H Integration** — after company visit July 27–31 to get credentials
+   - Replace `backend/app/core/ceisa_gateway.py` mock with real HTTP calls
+   - Add `CEISA_API_URL`, `CEISA_CLIENT_ID`, `CEISA_SECRET` to `.env`
 
-#### 1. Real CEISA H2H Integration
-After company visit (July 27–31, 2026) to get API credentials:
-- Replace `backend/app/core/ceisa_gateway.py` mock with real HTTP calls to CEISA PIB XML/JSON endpoint
-- Add credentials to `.env`: `CEISA_API_URL`, `CEISA_CLIENT_ID`, `CEISA_SECRET`
-- Handle real error codes and retry logic
+2. **XGBoost Risk Scorer** — after collecting real rejection data from company visit
+   - Training script: `backend/scripts/train_risk_model.py`
+   - Model file: `backend/models/risk_model.xgb`
+   - Replace rule-based scorer in `backend/app/services/risk_scorer.py`
 
-#### 2. XGBoost Risk Scorer Training
-After collecting real CEISA rejection data from company visit:
-- Replace `backend/app/services/risk_scorer.py` rule-based logic with a trained XGBoost model
-- Training script goes in `backend/scripts/train_risk_model.py`
-- Serialized model → `backend/models/risk_model.xgb`
-- `risk_scorer.py` loads model at startup via `xgboost.Booster().load_model()`
-
-#### 3. ML Kit Restoration
-When Google ships `google_mlkit_text_recognition` with proper XCFramework (arm64 simulator slice):
-- Re-add `google_mlkit_text_recognition: ^0.15.x` to `mobile/pubspec.yaml`
-- Restore `mobile/lib/services/ocr_service.dart` with the real `InputImage` + `TextRecognizer` implementation
-- Remove the stub. The `compute_confidence()` function will automatically resume Jaccard scoring once `ml_kit_text` is non-empty.
+3. **FCM Service Account** — manual step (no code needed)
+   - Firebase console → Project Settings → Service Accounts → Generate new private key
+   - Save JSON and set `FCM_SERVICE_ACCOUNT_JSON=/path/to/file.json` in `.env`

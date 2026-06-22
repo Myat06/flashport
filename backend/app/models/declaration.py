@@ -15,6 +15,12 @@ class ConfidenceLevel(str, enum.Enum):
     low = "low"
 
 
+class ReviewStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
 class RiskLevel(str, enum.Enum):
     green = "green"
     yellow = "yellow"
@@ -44,6 +50,7 @@ class Declaration(Base):
     fcm_token = Column(String)
     scanned_at = Column(DateTime(timezone=True), nullable=False)
     synced_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    image_data = Column(Text)
     ml_kit_text = Column(Text)
     tesseract_text = Column(Text)
     confidence_badge = Column(Enum(ConfidenceLevel))
@@ -51,6 +58,8 @@ class Declaration(Base):
     risk_badge = Column(Enum(RiskLevel))
     flagged_fields = Column(JSON, default=list)
     ceisa_ready = Column(Boolean, default=False)
+    review_status = Column(Enum(ReviewStatus), default=ReviewStatus.pending)
+    review_note = Column(Text)
     reviewed_by = Column(String)
     reviewed_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)

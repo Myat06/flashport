@@ -21,6 +21,8 @@ class SyncService {
 
   SyncService(this._db, this._operator, this._config);
 
+  String get configUrl => _config.url;
+
   Future<void> syncPending() async {
     final pending = await _db.getPending();
     int synced = 0;
@@ -35,10 +37,22 @@ class SyncService {
   Future<Map<String, dynamic>?> syncOneNow(ScanRecord record) async {
     await _db.insert(record);
     try {
+      // Compress image — copy to app documents first so path stays valid
       final compressed = await _compress(record.imagePath);
+      // ignore: avoid_print
+      print('[SyncService] Image compressed: ${compressed.length} bytes');
+
       final imageB64 = base64Encode(compressed);
       final operatorId = await _operator.getEmployeeId();
-      final fcmToken = await FirebaseMessaging.instance.getToken();
+
+      // FCM token — non-blocking, timeout fast so it never kills the sync
+      String? fcmToken;
+      try {
+        fcmToken = await FirebaseMessaging.instance.getToken()
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {
+        fcmToken = null;
+      }
 
       final payload = {
         'scan_id': record.scanId,
@@ -46,9 +60,12 @@ class SyncService {
         'document_type': record.documentType.apiValue,
         'operator_id': operatorId.isEmpty ? null : operatorId,
         'fcm_token': fcmToken,
-        'ml_kit_text': record.mlKitText,
+        'ml_kit_text': '',
         'image_b64': imageB64,
       };
+
+      // ignore: avoid_print
+      print('[SyncService] Sending to ${_config.url}/sync  payload=${jsonEncode(payload).length} bytes');
 
       final response = await http
           .post(
@@ -56,7 +73,10 @@ class SyncService {
             headers: {'Content-Type': 'application/json', ...await _authHeaders()},
             body: jsonEncode(payload),
           )
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 60));
+
+      // ignore: avoid_print
+      print('[SyncService] Response: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final serverResponse = jsonDecode(response.body) as Map<String, dynamic>;
@@ -64,11 +84,13 @@ class SyncService {
         try { File(record.imagePath).deleteSync(); } catch (_) {}
         return serverResponse;
       }
+      // ignore: avoid_print
+      print('[SyncService] Non-200: ${response.statusCode} ${response.body}');
       await _db.updateStatus(record.scanId, SyncStatus.pendingSync);
       return null;
-    } catch (e) {
+    } catch (e, stack) {
       // ignore: avoid_print
-      print('[SyncService] syncOneNow error: $e  url=${_config.url}');
+      print('[SyncService] ERROR: $e\n$stack\nurl=${_config.url}');
       await _db.updateStatus(record.scanId, SyncStatus.pendingSync);
       return null;
     }
@@ -94,7 +116,7 @@ class SyncService {
         'document_type': record.documentType.apiValue,
         'operator_id': operatorId.isEmpty ? null : operatorId,
         'fcm_token': fcmToken,
-        'ml_kit_text': record.mlKitText,
+        'ml_kit_text': '',
         'image_b64': imageB64,
       };
 

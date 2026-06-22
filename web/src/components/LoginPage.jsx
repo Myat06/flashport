@@ -26,7 +26,7 @@ export function LoginPage({ onLogin }) {
         <div className="text-center mb-8">
           <div className="text-4xl font-bold text-blue-400 tracking-tight mb-1">⚡ FlashPort</div>
           <div className="text-sm text-gray-500">Customs Declaration Platform</div>
-          <div className="text-xs text-gray-600 mt-1">Cikarang Dry Port · Bea dan Cukai</div>
+          <div className="text-xs text-gray-600 mt-1">Cikarang Dry Port · Customs & Excise</div>
         </div>
 
         {/* Card */}
@@ -71,7 +71,7 @@ export function LoginPage({ onLogin }) {
               disabled={loading}
               className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:text-blue-400 rounded-lg text-sm font-semibold text-white transition-colors"
             >
-              {loading ? "Masuk…" : "Masuk"}
+              {loading ? "Signing in…" : "Sign In"}
             </button>
           </form>
         </div>

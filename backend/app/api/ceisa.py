@@ -1,15 +1,24 @@
 import asyncio
 from uuid import UUID
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+
+from pydantic import BaseModel
 
 from app.config import settings
 from app.core.ceisa_gateway import simulate_submission
 from app.database import get_db
 from app.models.declaration import CeisaSubmission, Declaration, JalurType
 from app.schemas.declaration import CeisaSubmitRequest, CeisaSubmitResponse, CeisaSubmissionOut
+from app.services.audit_service import log as audit_log
 from app.services.fcm import send_ceisa_result
+
+
+class BatchSubmitRequest(BaseModel):
+    declaration_ids: list[UUID]
+    submitted_by: str | None = "manager"
 
 router = APIRouter(prefix="/ceisa", tags=["ceisa"])
 
@@ -37,10 +46,12 @@ async def submit_to_ceisa(body: CeisaSubmitRequest, db: Session = Depends(get_db
         raw_response=result,
     )
     db.add(submission)
+    audit_log(db, "ceisa.submitted", "declaration", str(body.declaration_id),
+              performed_by=body.submitted_by or "manager",
+              detail={"jalur": result["jalur"], "response_code": result["response_code"]})
     db.commit()
     db.refresh(submission)
 
-    # Fire push notification to operator (non-blocking)
     asyncio.create_task(send_ceisa_result(
         fcm_token=declaration.fcm_token or "",
         jalur=result["jalur"],
@@ -56,6 +67,33 @@ async def submit_to_ceisa(body: CeisaSubmitRequest, db: Session = Depends(get_db
         response_code=result["response_code"],
         response_message=result["response_message"],
     )
+
+
+@router.post("/batch-submit")
+async def batch_submit(body: BatchSubmitRequest, db: Session = Depends(get_db)):
+    results = []
+    for did in body.declaration_ids:
+        declaration = db.query(Declaration).filter(Declaration.id == did).first()
+        if not declaration:
+            results.append({"declaration_id": str(did), "error": "not found"})
+            continue
+        fields = {f.field_name: f.field_value for f in declaration.fields}
+        result = simulate_submission(str(declaration.id), declaration.risk_score or 0, fields)
+        submission = CeisaSubmission(
+            declaration_id=declaration.id,
+            submitted_by=body.submitted_by,
+            jalur=JalurType(result["jalur"]),
+            response_code=result["response_code"],
+            response_message=result["response_message"],
+            raw_response=result,
+        )
+        db.add(submission)
+        audit_log(db, "ceisa.submitted", "declaration", str(did),
+                  performed_by=body.submitted_by or "manager",
+                  detail={"jalur": result["jalur"], "batch": True})
+        results.append({"declaration_id": str(did), "jalur": result["jalur"], "response_code": result["response_code"]})
+    db.commit()
+    return {"submitted": len(results), "results": results}
 
 
 @router.get("/submissions", response_model=list[CeisaSubmissionOut])

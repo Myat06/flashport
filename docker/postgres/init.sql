@@ -1,6 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TYPE confidence_level AS ENUM ('high', 'medium', 'low');
+CREATE TYPE review_status AS ENUM ('pending', 'approved', 'rejected');
 CREATE TYPE risk_level AS ENUM ('green', 'yellow', 'red');
 CREATE TYPE jalur_type AS ENUM ('hijau', 'kuning', 'merah');
 CREATE TYPE doc_type AS ENUM ('commercial_invoice', 'bill_of_lading', 'packing_list');
@@ -11,8 +12,10 @@ CREATE TABLE declarations (
     document_type doc_type NOT NULL,
     operator_id TEXT,
     device_id TEXT,
+    fcm_token TEXT,
     scanned_at TIMESTAMPTZ NOT NULL,
     synced_at TIMESTAMPTZ DEFAULT NOW(),
+    image_data TEXT,
     ml_kit_text TEXT,
     tesseract_text TEXT,
     confidence_badge confidence_level,
@@ -20,6 +23,8 @@ CREATE TABLE declarations (
     risk_badge risk_level,
     flagged_fields JSONB DEFAULT '[]',
     ceisa_ready BOOLEAN DEFAULT FALSE,
+    review_status review_status DEFAULT 'pending',
+    review_note TEXT,
     reviewed_by TEXT,
     reviewed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -33,6 +38,15 @@ CREATE TABLE declaration_fields (
     field_value TEXT,
     is_edited BOOLEAN DEFAULT FALSE,
     edit_source TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE operators (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    employee_id TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    pin_hash TEXT NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

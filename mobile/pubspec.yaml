@@ -10,11 +10,9 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  # Camera & image picking
-  camera: ^0.11.0+2
+  # Document capture
   image_picker: ^1.1.2
   file_picker: ^8.1.2
-  # On-device OCR — stubbed until google_mlkit ships arm64 simulator slices (iOS 26 requirement)
   # Local storage
   sqflite: ^2.4.1
   path: ^1.9.0

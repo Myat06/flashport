@@ -26,6 +26,32 @@ def decode_pdf_pages(image_b64: str) -> list[np.ndarray]:
     return _pdf_to_ndarray(data)
 
 
+def extract_pdf_text_direct(image_b64: str) -> str | None:
+    """
+    Extract text directly from a digital PDF without OCR.
+
+    Uses pypdf to read the PDF text layer directly — much more accurate than
+    running Tesseract on a table-heavy digital PDF.
+    Returns None if the PDF has no text layer (scanned image PDF) so the
+    caller can fall back to Tesseract OCR.
+    """
+    try:
+        import io
+        from pypdf import PdfReader
+        pdf_bytes = base64.b64decode(image_b64)
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        pages_text = []
+        for page in reader.pages:
+            text = page.extract_text() or ""
+            pages_text.append(text)
+        combined = "\n".join(pages_text).strip()
+        if len(combined) > 50:
+            return combined
+        return None
+    except Exception:
+        return None
+
+
 def _pdf_to_ndarray(pdf_bytes: bytes, first_page: int = 1, last_page: int | None = None) -> list[np.ndarray]:
     from pdf2image import convert_from_bytes  # noqa: PLC0415
     kwargs = {"dpi": 200, "first_page": first_page}
@@ -36,7 +62,24 @@ def _pdf_to_ndarray(pdf_bytes: bytes, first_page: int = 1, last_page: int | None
 
 
 def preprocess(image: np.ndarray) -> np.ndarray:
+    """
+    Adaptive preprocessing pipeline:
+    - Clean / high-contrast images (digital scans, good phone photos):
+        grayscale only — thresholding would destroy them
+    - Noisy / low-contrast images (bad photos, dark shadows):
+        full pipeline: grayscale → denoise → threshold → deskew
+    """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Detect image quality:
+    # Clean document (digital render or good photo): most pixels are very white (>200)
+    # Noisy/dark photo: fewer white pixels, more mid-gray values
+    white_ratio = float((gray > 200).mean())
+    if white_ratio > 0.55:
+        # Already clean — white background, dark text — skip aggressive preprocessing
+        return gray
+
+    # Low contrast image — apply full preprocessing for phone photos
     denoised = cv2.GaussianBlur(gray, (3, 3), 0)
     thresh = cv2.adaptiveThreshold(
         denoised, 255,

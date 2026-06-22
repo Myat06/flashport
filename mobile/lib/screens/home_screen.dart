@@ -46,21 +46,57 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() => _operatorName = name);
   }
 
+  Future<void> _clearData() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF161B22),
+        title: const Text('Clear All Data'),
+        content: const Text(
+          'This will delete all scan records from this device.\n\n'
+          'Records already synced to the server are NOT affected.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Clear', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await context.read<DatabaseService>().clearAll();
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('All local scan records cleared'),
+            backgroundColor: Color(0xFF1B4FBF),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _logout() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF161B22),
-        title: const Text('Keluar'),
-        content: const Text('Yakin ingin keluar dari akun operator?'),
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to log out?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Batal'),
+            child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Keluar', style: TextStyle(color: Colors.red)),
+            child: const Text('Logout', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -106,9 +142,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 labelStyle: const TextStyle(color: Colors.orange, fontSize: 11),
               ),
             ),
+          if (_records.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.delete_sweep_outlined, size: 22),
+              tooltip: 'Clear all data',
+              onPressed: _clearData,
+            ),
           IconButton(
             icon: const Icon(Icons.logout, size: 22),
-            tooltip: 'Keluar',
+            tooltip: 'Logout',
             onPressed: _logout,
           ),
         ],

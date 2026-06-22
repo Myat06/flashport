@@ -111,7 +111,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Masuk Operator',
+                          'Operator Login',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -120,13 +120,13 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 4),
                         const Text(
-                          'Gunakan ID karyawan dan PIN Anda',
+                          'Enter your employee ID and PIN',
                           style: TextStyle(color: Colors.white38, fontSize: 13),
                         ),
                         const SizedBox(height: 24),
 
                         // Employee ID
-                        const Text('ID Karyawan',
+                        const Text('Employee ID',
                             style: TextStyle(color: Colors.white54, fontSize: 12)),
                         const SizedBox(height: 6),
                         TextFormField(
@@ -139,7 +139,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           decoration: _inputDecoration('e.g. CDP-001'),
                           validator: (v) =>
-                              (v == null || v.trim().isEmpty) ? 'Wajib diisi' : null,
+                              (v == null || v.trim().isEmpty) ? 'Required' : null,
                           onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
                         ),
 
@@ -166,7 +166,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                           validator: (v) =>
-                              (v == null || v.trim().isEmpty) ? 'Wajib diisi' : null,
+                              (v == null || v.trim().isEmpty) ? 'Required' : null,
                           onFieldSubmitted: (_) => _login(),
                         ),
 
@@ -239,7 +239,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   child: CircularProgressIndicator(
                                       strokeWidth: 2, color: Colors.white),
                                 )
-                              : const Text('Masuk →',
+                              : const Text('Sign In →',
                                   style: TextStyle(
                                       fontSize: 16, fontWeight: FontWeight.bold)),
                         ),
@@ -249,7 +249,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   const SizedBox(height: 24),
                   const Text(
-                    'Hubungi supervisor jika lupa PIN',
+                    'Contact your supervisor if you forgot your PIN',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: Colors.white24, fontSize: 12),
                   ),

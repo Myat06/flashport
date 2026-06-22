@@ -9,9 +9,9 @@ const DOC_LABELS = {
 
 const JALUR_CONFIG = {
   hijau: {
-    label: "JALUR HIJAU",
+    label: "GREEN LANE",
     code: "SP2-200",
-    desc: "Disetujui — Pengeluaran Segera",
+    desc: "Approved — Immediate Release",
     bar: "bg-emerald-500",
     badge: "bg-emerald-900/40 border-emerald-700 text-emerald-300",
     icon: "✓",
@@ -20,9 +20,9 @@ const JALUR_CONFIG = {
     glow: "shadow-emerald-900/30",
   },
   kuning: {
-    label: "JALUR KUNING",
+    label: "YELLOW LANE",
     code: "SP2-412",
-    desc: "Ditahan — Verifikasi Dokumen",
+    desc: "On Hold — Document Verification",
     bar: "bg-yellow-500",
     badge: "bg-yellow-900/40 border-yellow-700 text-yellow-300",
     icon: "!",
@@ -31,9 +31,9 @@ const JALUR_CONFIG = {
     glow: "shadow-yellow-900/30",
   },
   merah: {
-    label: "JALUR MERAH",
+    label: "RED LANE",
     code: "SP2-500",
-    desc: "Ditahan — Pemeriksaan Fisik",
+    desc: "On Hold — Physical Inspection",
     bar: "bg-red-500",
     badge: "bg-red-900/40 border-red-700 text-red-300",
     icon: "✕",
@@ -63,10 +63,10 @@ export function CeisaView({ token, refreshRef }) {
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-bold tracking-widest text-gray-500 uppercase">Direktorat Jenderal Bea dan Cukai</span>
+              <span className="text-xs font-bold tracking-widest text-gray-500 uppercase">Directorate General of Customs and Excise</span>
             </div>
-            <h1 className="text-lg font-bold text-white">Portal CEISA — Customs Clearance System</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Sistem Informasi Ekspor Impor · Mode Simulasi Phase 1</p>
+            <h1 className="text-lg font-bold text-white">CEISA — Customs Clearance System</h1>
+            <p className="text-xs text-gray-500 mt-0.5">Import / Export Information System · Phase 1 Simulation Mode</p>
           </div>
           <button
             onClick={refresh}
@@ -79,9 +79,9 @@ export function CeisaView({ token, refreshRef }) {
         {/* Summary bar */}
         <div className="grid grid-cols-3 gap-3 mt-4">
           {[
-            { key: "hijau", label: "Jalur Hijau", colour: "text-emerald-400" },
-            { key: "kuning", label: "Jalur Kuning", colour: "text-yellow-400" },
-            { key: "merah", label: "Jalur Merah", colour: "text-red-400" },
+            { key: "hijau", label: "Green Lane", colour: "text-emerald-400" },
+            { key: "kuning", label: "Yellow Lane", colour: "text-yellow-400" },
+            { key: "merah", label: "Red Lane", colour: "text-red-400" },
           ].map(({ key, label, colour }) => (
             <div key={key} className="bg-gray-800/60 rounded-lg px-4 py-3 text-center">
               <div className={`text-2xl font-bold ${colour}`}>{counts[key]}</div>
@@ -98,7 +98,7 @@ export function CeisaView({ token, refreshRef }) {
         ) : submissions.length === 0 ? (
           <div className="text-center py-20 text-gray-600">
             <div className="text-4xl mb-3">🏛️</div>
-            <div className="text-sm">Belum ada pengajuan PIB — submit deklarasi dari Live Feed untuk melihat respon CEISA.</div>
+            <div className="text-sm">No submissions yet — submit a declaration from the Live Feed to see the CEISA response.</div>
           </div>
         ) : (
           submissions.map((s) => <SubmissionRow key={s.id} submission={s} />)
@@ -111,7 +111,7 @@ export function CeisaView({ token, refreshRef }) {
 function SubmissionRow({ submission }) {
   const cfg = JALUR_CONFIG[submission.jalur] ?? JALUR_CONFIG.kuning;
   const submittedAt = submission.submitted_at
-    ? new Date(submission.submitted_at).toLocaleString("id-ID")
+    ? new Date(submission.submitted_at).toLocaleString()
     : "—";
 
   return (
@@ -143,7 +143,7 @@ function SubmissionRow({ submission }) {
           <div className="flex items-center gap-4 mt-3 text-xs text-gray-500 flex-wrap">
             <span>📄 {DOC_LABELS[submission.document_type] ?? submission.document_type ?? "—"}</span>
             {submission.risk_score != null && (
-              <span>⚠ Risiko {submission.risk_score}%</span>
+              <span>⚠ Risk {submission.risk_score}%</span>
             )}
             <span>👤 {submission.submitted_by ?? "Manager"}</span>
             <span>🕐 {submittedAt}</span>

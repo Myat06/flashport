@@ -29,19 +29,19 @@ def _determine_jalur(risk_score: int, fields: dict) -> tuple[JalurType, str, str
         return (
             JalurType.hijau,
             "SP2-200",
-            "Dokumen diterima. Peti kemas disetujui untuk pengeluaran segera (Jalur Hijau).",
+            "Document accepted. Container approved for immediate release (Green Lane).",
         )
     elif risk_score < 70:
-        missing = [k for k, v in fields.items() if not v]
-        detail = f"Field tidak lengkap: {', '.join(missing[:3])}" if missing else "Data memerlukan verifikasi dokumen"
+        missing = [k.replace("_", " ") for k, v in fields.items() if not v]
+        detail = f"Incomplete fields: {', '.join(missing[:3])}" if missing else "Data requires document verification"
         return (
             JalurType.kuning,
             "SP2-412",
-            f"Dokumen ditahan untuk verifikasi manual (Jalur Kuning). {detail}.",
+            f"Document held for manual verification (Yellow Lane). {detail}.",
         )
     else:
         return (
             JalurType.merah,
             "SP2-500",
-            "Peti kemas ditahan untuk pemeriksaan fisik (Jalur Merah). Risiko anomali terdeteksi. Harap hubungi petugas Bea Cukai.",
+            "Container held for physical inspection (Red Lane). Risk anomaly detected. Please contact Customs officer.",
         )

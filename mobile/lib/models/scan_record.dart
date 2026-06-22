@@ -23,7 +23,6 @@ enum DocumentType {
 class ScanRecord {
   final String scanId;
   final DocumentType documentType;
-  final String mlKitText;
   final String imagePath;
   final DateTime scannedAt;
   SyncStatus status;
@@ -32,7 +31,6 @@ class ScanRecord {
   ScanRecord({
     required this.scanId,
     required this.documentType,
-    required this.mlKitText,
     required this.imagePath,
     required this.scannedAt,
     this.status = SyncStatus.pendingSync,
@@ -42,7 +40,6 @@ class ScanRecord {
   Map<String, dynamic> toMap() => {
         'scan_id': scanId,
         'document_type': documentType.apiValue,
-        'ml_kit_text': mlKitText,
         'image_path': imagePath,
         'scanned_at': scannedAt.toIso8601String(),
         'status': status.index,
@@ -55,7 +52,6 @@ class ScanRecord {
           (e) => e.apiValue == map['document_type'],
           orElse: () => DocumentType.commercialInvoice,
         ),
-        mlKitText: map['ml_kit_text'] ?? '',
         imagePath: map['image_path'] ?? '',
         scannedAt: DateTime.parse(map['scanned_at']),
         status: SyncStatus.values[map['status'] ?? 0],

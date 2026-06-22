@@ -7,21 +7,51 @@ import 'result_screen.dart';
 
 class PreviewScreen extends StatefulWidget {
   final ScanRecord record;
-  final Map<String, dynamic>? ocrPreview;
 
-  const PreviewScreen({super.key, required this.record, this.ocrPreview});
+  const PreviewScreen({super.key, required this.record});
 
   @override
   State<PreviewScreen> createState() => _PreviewScreenState();
 }
 
-class _PreviewScreenState extends State<PreviewScreen> {
+class _PreviewScreenState extends State<PreviewScreen>
+    with SingleTickerProviderStateMixin {
   bool _saving = false;
+  int _uploadStep = 0; // 0=idle 1=preparing 2=uploading 3=processing
+  late final AnimationController _pulseCtrl;
+  late final Animation<double> _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _pulse = Tween(begin: 0.5, end: 1.0).animate(_pulseCtrl);
+  }
+
+  @override
+  void dispose() {
+    _pulseCtrl.dispose();
+    super.dispose();
+  }
 
   Future<void> _confirm() async {
-    setState(() => _saving = true);
+    setState(() { _saving = true; _uploadStep = 1; });
+
+    await Future.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
+    setState(() => _uploadStep = 2);
+
     try {
       final sync = context.read<SyncService>();
+
+      // Switch to step 3 after a short delay so user sees "uploading"
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted && _saving) setState(() => _uploadStep = 3);
+      });
+
       final serverResponse = await sync.syncOneNow(widget.record);
 
       if (!mounted) return;
@@ -32,75 +62,51 @@ class _PreviewScreenState extends State<PreviewScreen> {
           MaterialPageRoute(builder: (_) => ResultScreen(response: serverResponse)),
         );
       } else {
+        final url = context.read<SyncService>().configUrl;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Saved — will sync automatically when online'),
-            backgroundColor: Color(0xFF1B4FBF),
+          SnackBar(
+            content: Text('Saved as pending — server: $url'),
+            backgroundColor: Colors.orange.shade800,
+            duration: const Duration(seconds: 6),
           ),
         );
         Navigator.popUntil(context, (r) => r.isFirst);
       }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) setState(() { _saving = false; _uploadStep = 0; });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final isPdf = widget.record.imagePath.toLowerCase().endsWith('.pdf');
+    final file = File(widget.record.imagePath);
+    final fileSizeKb = file.existsSync()
+        ? (file.lengthSync() / 1024).toStringAsFixed(0)
+        : '—';
+    final fileName = widget.record.imagePath.split('/').last;
+
     return Scaffold(
       backgroundColor: const Color(0xFF0D1117),
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
-        title: Text('OCR Preview — ${widget.record.documentType.label}'),
+        title: Text('Review — ${widget.record.documentType.label}'),
       ),
-      body: Column(
-        children: [
-          // Document image or PDF placeholder
-          if (!isPdf && widget.record.imagePath.isNotEmpty)
-            Container(
-              height: 240,
-              width: double.infinity,
-              color: Colors.black,
-              child: Image.file(File(widget.record.imagePath), fit: BoxFit.contain),
-            )
-          else
-            Container(
-              height: 120,
-              width: double.infinity,
-              color: Colors.black,
-              child: const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.picture_as_pdf, size: 48, color: Colors.white24),
-                    SizedBox(height: 6),
-                    Text('PDF Document', style: TextStyle(color: Colors.white38, fontSize: 13)),
-                  ],
-                ),
-              ),
-            ),
-
-          // OCR result or offline notice
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: widget.ocrPreview != null
-                  ? _OcrResultSection(preview: widget.ocrPreview!)
-                  : const _OfflineNotice(),
-            ),
-          ),
-        ],
+      body: _saving ? _UploadingView(step: _uploadStep, pulse: _pulse) : _PreviewBody(
+        record: widget.record,
+        isPdf: isPdf,
+        fileName: fileName,
+        fileSizeKb: fileSizeKb,
       ),
-      bottomNavigationBar: SafeArea(
+      bottomNavigationBar: _saving ? null : SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: _saving ? null : () => Navigator.pop(context),
-                  icon: const Icon(Icons.refresh),
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.refresh, size: 18),
                   label: const Text('Retake'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.white54,
@@ -113,15 +119,10 @@ class _PreviewScreenState extends State<PreviewScreen> {
               Expanded(
                 flex: 2,
                 child: FilledButton.icon(
-                  onPressed: _saving ? null : _confirm,
-                  icon: _saving
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Icon(Icons.check_circle),
-                  label: Text(_saving ? 'Saving…' : 'Confirm & Save'),
+                  onPressed: _confirm,
+                  icon: const Icon(Icons.cloud_upload_rounded, size: 20),
+                  label: const Text('Upload & Sync',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF1B4FBF),
                     padding: const EdgeInsets.symmetric(vertical: 14),
@@ -136,182 +137,302 @@ class _PreviewScreenState extends State<PreviewScreen> {
   }
 }
 
-class _OcrResultSection extends StatelessWidget {
-  final Map<String, dynamic> preview;
+// ── Preview body — shown before upload ──────────────────────────────────────
+class _PreviewBody extends StatelessWidget {
+  final ScanRecord record;
+  final bool isPdf;
+  final String fileName;
+  final String fileSizeKb;
 
-  const _OcrResultSection({required this.preview});
+  const _PreviewBody({
+    required this.record,
+    required this.isPdf,
+    required this.fileName,
+    required this.fileSizeKb,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final confidence = preview['confidence_badge'] as String? ?? 'medium';
-    final riskScore = preview['risk_score'] as int? ?? 0;
-    final riskBadge = preview['risk_badge'] as String? ?? 'yellow';
-    final flagged = (preview['flagged_fields'] as List?)?.cast<String>() ?? [];
-    final fields = preview['extracted_fields'] as Map<String, dynamic>? ?? {};
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Document preview with "attached" badge
+          Stack(
+            children: [
+              if (!isPdf && record.imagePath.isNotEmpty)
+                Container(
+                  height: 260,
+                  width: double.infinity,
+                  color: Colors.black,
+                  child: Image.file(
+                    File(record.imagePath),
+                    fit: BoxFit.contain,
+                  ),
+                )
+              else
+                Container(
+                  height: 160,
+                  width: double.infinity,
+                  color: const Color(0xFF161B22),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1B4FBF).withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.picture_as_pdf,
+                            size: 52, color: Color(0xFF1B4FBF)),
+                      ),
+                      const SizedBox(height: 10),
+                      const Text('PDF Document',
+                          style: TextStyle(color: Colors.white54, fontSize: 13)),
+                    ],
+                  ),
+                ),
 
-    final riskColor = switch (riskBadge) {
-      'green' => Colors.green,
-      'red' => Colors.red,
-      _ => Colors.orange,
-    };
-    final confidenceColor = switch (confidence) {
-      'high' => Colors.blue,
-      'low' => Colors.red,
-      _ => Colors.orange,
-    };
+              // Green "attached" badge top-right
+              Positioned(
+                top: 12,
+                right: 12,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade800,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.4),
+                          blurRadius: 6)
+                    ],
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check_circle, size: 14, color: Colors.white),
+                      SizedBox(width: 5),
+                      Text('Attached',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            _Badge(label: 'OCR Confidence', value: confidence.toUpperCase(), colour: confidenceColor),
-            const SizedBox(width: 12),
-            _Badge(label: 'Risk Score', value: '$riskScore%', colour: riskColor),
-          ],
-        ),
-
-        if (flagged.isNotEmpty) ...[
-          const SizedBox(height: 12),
+          // File info strip
           Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.red.shade900.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.red.shade800),
+            color: const Color(0xFF161B22),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                Icon(
+                  isPdf ? Icons.picture_as_pdf : Icons.image_rounded,
+                  size: 16,
+                  color: Colors.white38,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    fileName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        const TextStyle(color: Colors.white54, fontSize: 11),
+                  ),
+                ),
+                Text(
+                  '$fileSizeKb KB',
+                  style:
+                      const TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+              ],
             ),
+          ),
+
+          const Divider(height: 1, color: Colors.white12),
+
+          // Details
+          Padding(
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
-                  children: [
-                    Icon(Icons.warning_amber, size: 14, color: Colors.redAccent),
-                    SizedBox(width: 6),
-                    Text('Flagged Issues',
-                        style: TextStyle(
-                            color: Colors.redAccent,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13)),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                ...flagged.map((f) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Text(
-                        f.replaceAll('missing:', 'Missing: '),
-                        style: const TextStyle(color: Colors.red, fontSize: 12),
+                _InfoRow(
+                    label: 'Document Type',
+                    value: record.documentType.label),
+                const SizedBox(height: 10),
+                _InfoRow(
+                    label: 'Scanned At',
+                    value: record.scannedAt
+                        .toLocal()
+                        .toString()
+                        .substring(0, 16)),
+                const SizedBox(height: 20),
+
+                // Ready to upload card
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade900.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                        color: Colors.green.shade800.withValues(alpha: 0.5)),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.check_circle_outline,
+                          size: 18, color: Colors.green),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Document ready to upload',
+                                style: TextStyle(
+                                    color: Colors.green,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12)),
+                            SizedBox(height: 4),
+                            Text(
+                              'Tap Upload & Sync to send to server for OCR '
+                              'processing and risk analysis. If offline, it '
+                              'will sync automatically when connected.',
+                              style: TextStyle(
+                                  color: Colors.green, fontSize: 11, height: 1.5),
+                            ),
+                          ],
+                        ),
                       ),
-                    )),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
         ],
-
-        const SizedBox(height: 16),
-        const Text('Extracted Fields',
-            style: TextStyle(
-                color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFF161B22),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.white12),
-          ),
-          child: Column(
-            children: [
-              _FieldRow('HS Code', fields['hs_code']),
-              _FieldRow('Invoice Value', fields['invoice_value']),
-              _FieldRow('Container ID', fields['container_id']),
-              _FieldRow('Importer', fields['importer']),
-              _FieldRow('Exporter', fields['exporter']),
-              _FieldRow('Net Weight', fields['net_weight']),
-              _FieldRow('Gross Weight', fields['gross_weight']),
-              _FieldRow('Vessel', fields['vessel_name']),
-              _FieldRow('Port of Origin', fields['port_of_origin'], last: true),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: const Color(0xFF161B22),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.white12),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.info_outline, size: 14, color: Colors.white38),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Review the fields above. Tap Confirm & Save to submit.',
-                  style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.4),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _OfflineNotice extends StatelessWidget {
-  const _OfflineNotice();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: const Row(
-        children: [
-          Icon(Icons.wifi_off, size: 18, color: Colors.white38),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'OCR preview unavailable — device is offline.\nTesseract will process the document automatically when connected.',
-              style: TextStyle(color: Colors.white38, fontSize: 13, height: 1.5),
-            ),
-          ),
-        ],
       ),
     );
   }
 }
 
-class _Badge extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color colour;
+// ── Upload progress view — shown while syncing ───────────────────────────────
+class _UploadingView extends StatelessWidget {
+  final int step;
+  final Animation<double> pulse;
 
-  const _Badge({required this.label, required this.value, required this.colour});
+  static const _steps = [
+    (Icons.compress,         'Preparing document...'),
+    (Icons.cloud_upload,     'Uploading to server...'),
+    (Icons.psychology_rounded,'Running OCR & AI analysis...'),
+  ];
+
+  const _UploadingView({required this.step, required this.pulse});
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-        decoration: BoxDecoration(
-          color: colour.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: colour.withValues(alpha: 0.3)),
-        ),
+    final activeStep = (step - 1).clamp(0, _steps.length - 1);
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(value,
-                style: TextStyle(
-                    color: colour, fontWeight: FontWeight.bold, fontSize: 16)),
-            const SizedBox(height: 2),
-            Text(label,
-                style: const TextStyle(color: Colors.white38, fontSize: 11)),
+            // Pulsing upload icon
+            FadeTransition(
+              opacity: pulse,
+              child: Container(
+                width: 90,
+                height: 90,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1B4FBF).withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: const Color(0xFF1B4FBF).withValues(alpha: 0.4),
+                      width: 2),
+                ),
+                child: const Icon(Icons.cloud_upload_rounded,
+                    size: 42, color: Color(0xFF1B4FBF)),
+              ),
+            ),
+
+            const SizedBox(height: 32),
+
+            // Step indicators
+            ..._steps.asMap().entries.map((e) {
+              final i = e.key;
+              final (icon, label) = e.value;
+              final isDone = i < activeStep;
+              final isActive = i == activeStep;
+              final _ = i > activeStep; // pending — used for styling via isDone/isActive
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isDone
+                            ? Colors.green.shade700
+                            : isActive
+                                ? const Color(0xFF1B4FBF)
+                                : Colors.white12,
+                      ),
+                      child: Center(
+                        child: isDone
+                            ? const Icon(Icons.check, size: 16,
+                                color: Colors.white)
+                            : isActive
+                                ? SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white.withValues(alpha: 0.9)),
+                                  )
+                                : Icon(icon, size: 16, color: Colors.white24),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDone
+                            ? Colors.green
+                            : isActive
+                                ? Colors.white
+                                : Colors.white24,
+                        fontWeight: isActive
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+
+            const SizedBox(height: 32),
+            Text(
+              'Please keep the app open...',
+              style: TextStyle(
+                  color: Colors.white38, fontSize: 12),
+            ),
           ],
         ),
       ),
@@ -319,40 +440,27 @@ class _Badge extends StatelessWidget {
   }
 }
 
-class _FieldRow extends StatelessWidget {
+class _InfoRow extends StatelessWidget {
   final String label;
-  final dynamic value;
-  final bool last;
+  final String value;
 
-  const _FieldRow(this.label, this.value, {this.last = false});
+  const _InfoRow({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
-    final hasValue = value != null && value.toString().isNotEmpty;
-    return Container(
-      decoration: BoxDecoration(
-        border: last ? null : const Border(bottom: BorderSide(color: Colors.white12)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 110,
-            child: Text(label,
-                style: const TextStyle(color: Colors.white38, fontSize: 12)),
-          ),
-          Expanded(
-            child: Text(
-              hasValue ? value.toString() : '—',
-              style: TextStyle(
-                color: hasValue ? Colors.white70 : Colors.white24,
-                fontSize: 13,
-                fontStyle: hasValue ? FontStyle.normal : FontStyle.italic,
-              ),
-            ),
-          ),
-        ],
-      ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 110,
+          child: Text(label,
+              style: const TextStyle(color: Colors.white38, fontSize: 12)),
+        ),
+        Expanded(
+          child: Text(value,
+              style: const TextStyle(color: Colors.white70, fontSize: 13)),
+        ),
+      ],
     );
   }
 }

@@ -1,19 +1,9 @@
-import 'dart:convert';
-import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
-import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
-import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import '../models/scan_record.dart';
-import '../services/backend_config.dart';
-import '../services/ocr_service.dart';
-import '../services/operator_service.dart';
 import 'preview_screen.dart';
-
-const _apiKey = String.fromEnvironment('API_KEY', defaultValue: 'changeme');
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -24,15 +14,8 @@ class CameraScreen extends StatefulWidget {
 
 class _CameraScreenState extends State<CameraScreen> {
   final _picker = ImagePicker();
-  final _ocr = OcrService();
   bool _processing = false;
   DocumentType _docType = DocumentType.commercialInvoice;
-
-  @override
-  void dispose() {
-    _ocr.dispose();
-    super.dispose();
-  }
 
   Future<void> _capture(ImageSource source) async {
     final file = await _picker.pickImage(
@@ -58,73 +41,24 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _processPath(String filePath) async {
     setState(() => _processing = true);
-    // Capture service reference before any await that could lose context
-    final operatorService = context.read<OperatorService>();
-    final config = context.read<BackendConfig>();
     try {
-      final text = await _ocr.recognize(filePath);
-      if (!mounted) return;
-
       final record = ScanRecord(
         scanId: const Uuid().v4(),
         documentType: _docType,
-        mlKitText: text,
         imagePath: filePath,
         scannedAt: DateTime.now(),
       );
-
-      final previewResult = await _fetchOcrPreview(record, operatorService, config);
 
       if (!mounted) return;
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => PreviewScreen(record: record, ocrPreview: previewResult),
+          builder: (_) => PreviewScreen(record: record),
         ),
       );
     } finally {
       if (mounted) setState(() => _processing = false);
     }
-  }
-
-  Future<Map<String, dynamic>?> _fetchOcrPreview(
-      ScanRecord record, OperatorService operatorService, BackendConfig config) async {
-    try {
-      final List<int> bytes;
-      if (record.imagePath.toLowerCase().endsWith('.pdf')) {
-        bytes = await File(record.imagePath).readAsBytes();
-      } else {
-        final compressed = await FlutterImageCompress.compressWithFile(
-          record.imagePath,
-          quality: 75,
-          minWidth: 1280,
-          minHeight: 720,
-        );
-        bytes = compressed ?? await File(record.imagePath).readAsBytes();
-      }
-
-      final token = await operatorService.getToken();
-      final authHeader = (token != null && token.isNotEmpty)
-          ? {'Authorization': 'Bearer $token'}
-          : {'X-API-Key': _apiKey};
-
-      final response = await http
-          .post(
-            Uri.parse('${config.url}/ocr/preview'),
-            headers: {'Content-Type': 'application/json', ...authHeader},
-            body: jsonEncode({
-              'document_type': record.documentType.apiValue,
-              'ml_kit_text': record.mlKitText,
-              'image_b64': base64Encode(bytes),
-            }),
-          )
-          .timeout(const Duration(seconds: 30));
-
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
-      }
-    } catch (_) {}
-    return null;
   }
 
   @override
@@ -142,7 +76,7 @@ class _CameraScreenState extends State<CameraScreen> {
                 children: [
                   CircularProgressIndicator(color: Color(0xFF1B4FBF)),
                   SizedBox(height: 16),
-                  Text('Running OCR…', style: TextStyle(color: Colors.white54)),
+                  Text('Processing…', style: TextStyle(color: Colors.white54)),
                 ],
               ),
             )

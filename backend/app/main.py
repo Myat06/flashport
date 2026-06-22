@@ -4,12 +4,16 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine
-from app.api import auth, ceisa, declarations, ocr, sync, ws
+from app.api import auth, audit, ceisa, declarations, export, hs_codes, operators, risk_rules, sla, sync, watchlist, ws
 from app.api.auth import hash_pin, verify_token
 
 # Import all models so create_all picks up every table
 from app.models import declaration  # noqa: F401
 from app.models import operator as operator_model  # noqa: F401
+from app.models import audit as audit_model  # noqa: F401
+from app.models import watchlist as watchlist_model  # noqa: F401
+from app.models import risk_rule as risk_rule_model  # noqa: F401
+from app.models import hs_code as hs_code_model  # noqa: F401
 
 Base.metadata.create_all(bind=engine)
 
@@ -49,7 +53,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_PROTECTED = ("/sync", "/declarations", "/ceisa", "/ocr")
+_PROTECTED = ("/sync", "/declarations", "/ceisa", "/audit", "/watchlist", "/risk-rules", "/hs-codes", "/operators", "/sla", "/export")
 
 
 @app.middleware("http")
@@ -74,10 +78,16 @@ async def auth_check(request: Request, call_next):
 
 app.include_router(auth.router)
 app.include_router(sync.router)
-app.include_router(ocr.router)
 app.include_router(declarations.router)
 app.include_router(ceisa.router)
 app.include_router(ws.router)
+app.include_router(audit.router)
+app.include_router(watchlist.router)
+app.include_router(risk_rules.router)
+app.include_router(hs_codes.router)
+app.include_router(operators.router)
+app.include_router(sla.router)
+app.include_router(export.router)
 
 
 @app.get("/health")

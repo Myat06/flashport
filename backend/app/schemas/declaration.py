@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from app.models.declaration import ConfidenceLevel, DocType, JalurType, RiskLevel
+from app.models.declaration import ConfidenceLevel, DocType, JalurType, ReviewStatus, RiskLevel
 
 
 class SyncPayload(BaseModel):
@@ -32,6 +32,14 @@ class ExtractedFields(BaseModel):
     carton_count: Optional[str] = None
 
 
+class ShapEntry(BaseModel):
+    feature: str
+    label: str
+    value: float
+    shap_value: float
+    direction: str   # "increase" | "decrease"
+
+
 class SyncResponse(BaseModel):
     declaration_id: UUID
     confidence_badge: ConfidenceLevel
@@ -40,6 +48,8 @@ class SyncResponse(BaseModel):
     extracted_fields: ExtractedFields
     flagged_fields: list[str]
     ceisa_ready: bool
+    shap_values: list[ShapEntry] = []
+    extraction_method: str = "regex"
 
 
 class OcrPreviewResponse(BaseModel):
@@ -54,6 +64,12 @@ class DeclarationUpdate(BaseModel):
     field_name: str
     field_value: str
     reviewed_by: Optional[str] = None
+
+
+class ReviewRequest(BaseModel):
+    status: ReviewStatus
+    note: Optional[str] = None
+    reviewed_by: Optional[str] = "manager"
 
 
 class CeisaSubmitRequest(BaseModel):
@@ -98,6 +114,10 @@ class DeclarationOut(BaseModel):
     extracted_fields: Optional[ExtractedFields]
     flagged_fields: list[str]
     ceisa_ready: bool
+    review_status: Optional[ReviewStatus] = ReviewStatus.pending
+    review_note: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
     created_at: datetime
 
     class Config:

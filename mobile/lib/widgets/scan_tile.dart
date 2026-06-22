@@ -70,15 +70,9 @@ class ScanTile extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(color: Colors.white38, fontSize: 11),
                       ),
-                    ] else if (!isSynced && record.mlKitText.isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        record.mlKitText.replaceAll('\n', ' ').trim(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white24, fontSize: 11),
-                      ),
                     ],
+                    const SizedBox(height: 4),
+                    _StatusTimeline(record: record),
                   ],
                 ),
               ),
@@ -155,9 +149,9 @@ class _RiskBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, colour) = switch (riskBadge) {
-      'green' => ('Hijau', Colors.green),
-      'red' => ('Merah', Colors.red),
-      _ => ('Kuning', Colors.orange),
+      'green' => ('Green', Colors.green),
+      'red' => ('Red', Colors.red),
+      _ => ('Yellow', Colors.orange),
     };
 
     return Column(
@@ -186,6 +180,60 @@ class _RiskBadge extends StatelessWidget {
             style: TextStyle(color: colour.withValues(alpha: 0.6), fontSize: 10),
           ),
         ],
+      ],
+    );
+  }
+}
+
+class _StatusTimeline extends StatelessWidget {
+  final ScanRecord record;
+  const _StatusTimeline({required this.record});
+
+  @override
+  Widget build(BuildContext context) {
+    final serverResponse = record.serverResponse;
+    final reviewStatus = serverResponse?['review_status'] as String?;
+
+    final steps = <({String label, bool done, Color color})>[
+      (label: 'Scanned', done: true, color: Colors.blue),
+      (label: 'Synced', done: record.status == SyncStatus.synced, color: Colors.purple),
+      (label: 'Reviewed', done: reviewStatus != null && reviewStatus != 'pending', color: Colors.orange),
+      if (reviewStatus == 'approved')
+        (label: 'Approved', done: true, color: Colors.green)
+      else if (reviewStatus == 'rejected')
+        (label: 'Rejected', done: true, color: Colors.red),
+    ];
+
+    return Row(
+      children: steps.expand((step) => [
+        _Dot(done: step.done, colour: step.color, label: step.label),
+        if (step != steps.last)
+          Expanded(child: Container(height: 1, color: step.done ? Colors.white12 : Colors.white12)),
+      ]).toList(),
+    );
+  }
+}
+
+class _Dot extends StatelessWidget {
+  final bool done;
+  final Color colour;
+  final String label;
+  const _Dot({required this.done, required this.colour, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: done ? colour : Colors.white12,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(label, style: TextStyle(fontSize: 8, color: done ? colour.withValues(alpha: 0.8) : Colors.white24)),
       ],
     );
   }

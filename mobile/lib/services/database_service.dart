@@ -15,18 +15,23 @@ class DatabaseService {
     final path = join(await getDatabasesPath(), 'flashport.db');
     return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, _) => db.execute('''
         CREATE TABLE scan_records (
           scan_id TEXT PRIMARY KEY,
           document_type TEXT NOT NULL,
-          ml_kit_text TEXT,
           image_path TEXT,
           scanned_at TEXT NOT NULL,
           status INTEGER DEFAULT 0,
           server_response TEXT
         )
       '''),
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          // ml_kit_text removed — OCR is backend-only
+          try { await db.execute('ALTER TABLE scan_records DROP COLUMN ml_kit_text'); } catch (_) {}
+        }
+      },
     );
   }
 
@@ -70,5 +75,10 @@ class DatabaseService {
     final rows =
         await d.query('scan_records', orderBy: 'scanned_at DESC', limit: 50);
     return rows.map(ScanRecord.fromMap).toList();
+  }
+
+  Future<void> clearAll() async {
+    final d = await db;
+    await d.delete('scan_records');
   }
 }

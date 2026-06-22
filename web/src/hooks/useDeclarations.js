@@ -76,5 +76,25 @@ export function useDeclarations(token) {
     return res.json();
   };
 
-  return { declarations, connected, loading, updateField, submitToCeisa, refetch };
+  const reviewDeclaration = async (declarationId, status, note) => {
+    await fetch(`${API}/declarations/${declarationId}/review`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
+      body: JSON.stringify({ status, note, reviewed_by: "manager" }),
+    });
+    setDeclarations((prev) =>
+      prev.map((d) => {
+        if (d.id !== declarationId) return d;
+        return {
+          ...d,
+          review_status: status,
+          review_note: note,
+          reviewed_by: "manager",
+          reviewed_at: new Date().toISOString(),
+        };
+      })
+    );
+  };
+
+  return { declarations, connected, loading, updateField, submitToCeisa, reviewDeclaration, refetch };
 }
