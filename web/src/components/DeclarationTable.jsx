@@ -52,8 +52,10 @@ function ConfPill({ badge }) {
 }
 
 export function DeclarationTable({ declarations, onSelect, selectedIds = new Set(), onSelectIds }) {
-  const [filter, setFilter] = useState("all");
-  const [search, setSearch] = useState("");
+  const [filter, setFilter]   = useState("all");
+  const [search, setSearch]   = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo]     = useState("");
 
   const toggleSelect = (e, id) => {
     e.stopPropagation();
@@ -62,14 +64,22 @@ export function DeclarationTable({ declarations, onSelect, selectedIds = new Set
     onSelectIds?.(next);
   };
 
+  const clearDates = () => { setDateFrom(""); setDateTo(""); };
+
   const filtered = declarations.filter((d) => {
     const status = d.review_status ?? "pending";
     if (filter !== "all" && status !== filter) return false;
     if (search) {
-      const q = search.toLowerCase();
+      const q   = search.toLowerCase();
       const doc = DOC_LABELS[d.document_type]?.toLowerCase() ?? "";
-      const op = (d.operator_id ?? "").toLowerCase();
+      const op  = (d.operator_id ?? "").toLowerCase();
       if (!doc.includes(q) && !op.includes(q)) return false;
+    }
+    if (dateFrom || dateTo) {
+      const ts = d.scanned_at ? new Date(d.scanned_at) : null;
+      if (!ts) return false;
+      if (dateFrom && ts < new Date(dateFrom))                   return false;
+      if (dateTo   && ts > new Date(dateTo + "T23:59:59"))       return false;
     }
     return true;
   });
@@ -101,13 +111,35 @@ export function DeclarationTable({ declarations, onSelect, selectedIds = new Set
             );
           })}
         </div>
-        <input
-          type="text"
-          placeholder="Search document or operator…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-blue-500 w-56"
-        />
+        <div className="flex items-center gap-2">
+          {/* Date range */}
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            title="From date"
+            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-blue-500 w-32 [color-scheme:dark]"
+          />
+          <span className="text-gray-600 text-xs">–</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            title="To date"
+            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-blue-500 w-32 [color-scheme:dark]"
+          />
+          {(dateFrom || dateTo) && (
+            <button onClick={clearDates} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">✕</button>
+          )}
+          {/* Search */}
+          <input
+            type="text"
+            placeholder="Search document or operator…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-blue-500 w-48"
+          />
+        </div>
       </div>
 
       {/* Header row */}

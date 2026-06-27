@@ -7,7 +7,10 @@ from app.database import get_db
 from app.models.declaration import (
     ConfidenceLevel, Declaration, DeclarationField, ReviewStatus, RiskLevel,
 )
-from app.schemas.declaration import DeclarationOut, DeclarationUpdate, ExtractedFields, ReviewRequest
+from app.schemas.declaration import (
+    DeclarationOut, DeclarationUpdate, ExtractedFields,
+    FieldBbox, FieldValidationResult, ReviewRequest,
+)
 from app.services.audit_service import log as audit_log
 
 router = APIRouter(prefix="/declarations", tags=["declarations"])
@@ -39,7 +42,7 @@ def list_declarations(
             confidence_badge=row.confidence_badge,
             risk_score=row.risk_score,
             risk_badge=row.risk_badge,
-            extracted_fields=ExtractedFields(**{k: fields.get(k) for k in ExtractedFields.model_fields}),
+            extracted_fields=ExtractedFields(**fields),
             flagged_fields=row.flagged_fields or [],
             ceisa_ready=row.ceisa_ready,
             review_status=row.review_status or ReviewStatus.pending,
@@ -59,7 +62,16 @@ def get_declaration_image(declaration_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Declaration not found")
     if not declaration.image_data:
         raise HTTPException(status_code=404, detail="No image stored for this declaration")
-    return {"image_data": declaration.image_data, "document_type": declaration.document_type}
+
+    validation_results = _build_validation_out(declaration.fields)
+
+    return {
+        "image_data":         declaration.image_data,
+        "document_type":      declaration.document_type,
+        "image_width":        declaration.image_width,
+        "image_height":       declaration.image_height,
+        "validation_results": [r.model_dump() for r in validation_results],
+    }
 
 
 @router.patch("/{declaration_id}/field")
@@ -142,10 +154,11 @@ async def review_declaration(
 
 @router.post("/{declaration_id}/reprocess")
 def reprocess_declaration(declaration_id: UUID, db: Session = Depends(get_db)):
-    from app.services.extractor import extract_fields
-    from app.services.ocr import compute_confidence, run_tesseract
+    from app.services.extractor import extract_fields, find_field_bboxes
+    from app.services.ocr import compute_confidence, run_tesseract, run_tesseract_with_boxes
     from app.services.preprocessing import decode_image, decode_pdf_pages, extract_pdf_text_direct, is_pdf, preprocess
     from app.services.risk_scorer import score as compute_risk
+    from app.services.validator import validate_fields, validation_risk_boost
 
     declaration = db.query(Declaration).filter(Declaration.id == declaration_id).first()
     if not declaration:
@@ -153,19 +166,42 @@ def reprocess_declaration(declaration_id: UUID, db: Session = Depends(get_db)):
     if not declaration.image_data:
         raise HTTPException(status_code=400, detail="No image stored — cannot reprocess")
 
+    word_data: list[dict] = []
+    img_w = declaration.image_width
+    img_h = declaration.image_height
+
     if is_pdf(declaration.image_data):
         direct_text = extract_pdf_text_direct(declaration.image_data)
         if direct_text:
             tesseract_text = direct_text
         else:
             images = decode_pdf_pages(declaration.image_data)
-            tesseract_text = "\n".join(run_tesseract(preprocess(img)) for img in images)
+            if images:
+                tesseract_text, word_data, img_w, img_h = run_tesseract_with_boxes(images[0])
+                for img in images[1:]:
+                    tesseract_text += "\n" + run_tesseract(preprocess(img))
+            else:
+                tesseract_text = ""
     else:
-        tesseract_text = run_tesseract(preprocess(decode_image(declaration.image_data)))
+        raw_image = decode_image(declaration.image_data)
+        tesseract_text, word_data, img_w, img_h = run_tesseract_with_boxes(raw_image)
 
     _, confidence_badge = compute_confidence("", tesseract_text)
-    extraction = extract_fields(tesseract_text)
-    risk_score, risk_badge, flagged, _ = compute_risk(extraction, confidence_badge, db=db)
+
+    from app.api.sync import _load_field_defs
+    field_defs = _load_field_defs(db, declaration.document_type.value)
+
+    extraction = extract_fields(tesseract_text, field_defs)
+    bboxes     = find_field_bboxes(word_data, extraction)
+    v_results  = validate_fields(extraction, field_defs, db=db, bboxes=bboxes)
+    extra_risk = validation_risk_boost(v_results)
+
+    risk_score, risk_badge, flagged, _ = compute_risk(
+        extraction, confidence_badge, field_defs, db=db,
+        document_type=declaration.document_type.value,
+    )
+    risk_score = min(100, risk_score + extra_risk)
+    risk_badge = "green" if risk_score < 30 else "yellow" if risk_score < 70 else "red"
 
     declaration.tesseract_text = tesseract_text
     declaration.confidence_badge = ConfidenceLevel(confidence_badge)
@@ -173,15 +209,51 @@ def reprocess_declaration(declaration_id: UUID, db: Session = Depends(get_db)):
     declaration.risk_badge = RiskLevel(risk_badge)
     declaration.flagged_fields = flagged
     declaration.ceisa_ready = confidence_badge == "high" and risk_score < 30
+    declaration.image_width = img_w
+    declaration.image_height = img_h
 
     db.query(DeclarationField).filter(DeclarationField.declaration_id == declaration_id).delete()
     field_dict = extraction.to_dict()
+    vr_map = {r["field_name"]: r for r in v_results}
     for name, value in field_dict.items():
-        if value:
-            db.add(DeclarationField(declaration_id=declaration.id, field_name=name, field_value=value))
+        if value is None:
+            continue
+        vr  = vr_map.get(name, {})
+        box = vr.get("bbox")
+        db.add(DeclarationField(
+            declaration_id=declaration.id,
+            field_name=name,
+            field_value=value,
+            bbox_x=box["x"] if box else None,
+            bbox_y=box["y"] if box else None,
+            bbox_w=box["w"] if box else None,
+            bbox_h=box["h"] if box else None,
+            is_valid=vr.get("is_valid"),
+            validation_message=vr.get("message"),
+            priority=vr.get("priority"),
+        ))
 
     audit_log(db, "declaration.reprocessed", "declaration", str(declaration_id),
               performed_by="manager",
               detail={"new_risk_score": risk_score, "new_confidence": confidence_badge})
     db.commit()
     return {"status": "reprocessed", "risk_score": risk_score, "confidence_badge": confidence_badge}
+
+
+def _build_validation_out(fields) -> list[FieldValidationResult]:
+    results = []
+    for f in fields:
+        if f.priority is None:
+            continue
+        bbox = None
+        if f.bbox_x is not None:
+            bbox = FieldBbox(x=f.bbox_x, y=f.bbox_y, w=f.bbox_w, h=f.bbox_h)
+        results.append(FieldValidationResult(
+            field_name=f.field_name,
+            value=f.field_value,
+            is_valid=f.is_valid if f.is_valid is not None else True,
+            priority=f.priority,
+            message=f.validation_message,
+            bbox=bbox,
+        ))
+    return results

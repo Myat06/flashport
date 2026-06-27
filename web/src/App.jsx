@@ -12,6 +12,9 @@ import { CeisaView } from "./components/CeisaView";
 import { OperatorsView } from "./components/OperatorsView";
 import { WatchlistView } from "./components/WatchlistView";
 import { RiskRulesView } from "./components/RiskRulesView";
+import { FieldValidationRulesView } from "./components/FieldValidationRulesView";
+import FieldDefinitionsView from "./components/FieldDefinitionsView";
+import { useFieldDefs } from "./hooks/useFieldDefs";
 import { SLAView } from "./components/SLAView";
 import { AuditView } from "./components/AuditView";
 import { LoginPage } from "./components/LoginPage";
@@ -26,6 +29,8 @@ const PAGE_TITLES = {
   operators: "Operators",
   watchlist: "Watchlist",
   "risk-rules": "Risk Rules",
+  "validation-rules": "Validation Rules",
+  "field-schema": "Field Schema",
   audit: "Audit Trail",
 };
 
@@ -36,9 +41,13 @@ export default function App() {
 }
 
 function Dashboard({ token, onLogout }) {
-  const { declarations, connected, loading, updateField, submitToCeisa, reviewDeclaration, refetch } =
-    useDeclarations(token);
+  const {
+    declarations, connected, loading,
+    redLaneAlert, dismissRedAlert,
+    updateField, submitToCeisa, reviewDeclaration, refetch,
+  } = useDeclarations(token);
   const api = useAPI(token);
+  const { fieldDefs } = useFieldDefs(token);
   const [view, setView] = useState("overview");
   const [selected, setSelected] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -127,9 +136,39 @@ function Dashboard({ token, onLogout }) {
     api.download("/export/declarations.csv", "flashport_declarations.csv");
   };
 
+  const DOC_LABELS_ALERT = {
+    commercial_invoice: "Commercial Invoice",
+    bill_of_lading: "Bill of Lading",
+    packing_list: "Packing List",
+  };
+
   return (
     <div className="min-h-screen bg-gray-950 text-white flex">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
+      {/* Red lane real-time alert */}
+      {redLaneAlert && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-red-950 border border-red-700 rounded-xl px-5 py-3 shadow-2xl animate-pulse">
+          <span className="w-2.5 h-2.5 rounded-full bg-red-400 shrink-0" />
+          <div>
+            <div className="text-sm font-bold text-red-300">Red Lane — Immediate Review Required</div>
+            <div className="text-xs text-red-400 mt-0.5">
+              {DOC_LABELS_ALERT[redLaneAlert.document_type] ?? "Document"} · Risk score {redLaneAlert.risk_score}%
+            </div>
+          </div>
+          <button
+            onClick={() => { setView("declarations"); dismissRedAlert(); }}
+            className="ml-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded-lg text-xs font-semibold text-white transition-colors shrink-0"
+          >
+            Review →
+          </button>
+          <button onClick={dismissRedAlert} className="text-red-600 hover:text-red-400 transition-colors ml-1">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       <Sidebar view={view} setView={handleTabChange} connected={connected} onLogout={onLogout} />
 
@@ -208,6 +247,10 @@ function Dashboard({ token, onLogout }) {
             <WatchlistView token={token} />
           ) : view === "risk-rules" ? (
             <RiskRulesView token={token} />
+          ) : view === "validation-rules" ? (
+            <FieldValidationRulesView token={token} fieldDefs={fieldDefs} />
+          ) : view === "field-schema" ? (
+            <FieldDefinitionsView />
           ) : view === "audit" ? (
             <AuditView token={token} />
           ) : null}
@@ -218,6 +261,7 @@ function Dashboard({ token, onLogout }) {
         <DetailPanel
           declaration={selected}
           token={token}
+          fieldDefs={fieldDefs}
           onClose={handleClosePanel}
           onUpdate={handleUpdate}
           onReview={handleReview}

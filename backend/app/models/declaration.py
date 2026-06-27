@@ -51,6 +51,8 @@ class Declaration(Base):
     scanned_at = Column(DateTime(timezone=True), nullable=False)
     synced_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     image_data = Column(Text)
+    image_width = Column(Integer)
+    image_height = Column(Integer)
     ml_kit_text = Column(Text)
     tesseract_text = Column(Text)
     confidence_badge = Column(Enum(ConfidenceLevel))
@@ -78,6 +80,15 @@ class DeclarationField(Base):
     field_value = Column(Text)
     is_edited = Column(Boolean, default=False)
     edit_source = Column(String)
+    # Bounding box in original image pixel coordinates
+    bbox_x = Column(Integer)
+    bbox_y = Column(Integer)
+    bbox_w = Column(Integer)
+    bbox_h = Column(Integer)
+    # Validation state
+    is_valid = Column(Boolean)
+    validation_message = Column(Text)
+    priority = Column(String)   # critical | important | optional
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
     declaration = relationship("Declaration", back_populates="fields")

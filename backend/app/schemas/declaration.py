@@ -1,10 +1,26 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.models.declaration import ConfidenceLevel, DocType, JalurType, ReviewStatus, RiskLevel
+
+
+class FieldBbox(BaseModel):
+    x: int
+    y: int
+    w: int
+    h: int
+
+
+class FieldValidationResult(BaseModel):
+    field_name: str
+    value: Optional[str] = None
+    is_valid: bool
+    priority: str           # critical | important | optional
+    message: Optional[str] = None
+    bbox: Optional[FieldBbox] = None
 
 
 class SyncPayload(BaseModel):
@@ -19,17 +35,8 @@ class SyncPayload(BaseModel):
 
 
 class ExtractedFields(BaseModel):
-    hs_code: Optional[str] = None
-    invoice_value: Optional[str] = None
-    container_id: Optional[str] = None
-    importer: Optional[str] = None
-    exporter: Optional[str] = None
-    net_weight: Optional[str] = None
-    gross_weight: Optional[str] = None
-    vessel_name: Optional[str] = None
-    port_of_origin: Optional[str] = None
-    invoice_number: Optional[str] = None
-    carton_count: Optional[str] = None
+    """Fully dynamic: any field_key/value pairs from field_definitions are allowed."""
+    model_config = ConfigDict(extra="allow")
 
 
 class ShapEntry(BaseModel):
@@ -50,6 +57,9 @@ class SyncResponse(BaseModel):
     ceisa_ready: bool
     shap_values: list[ShapEntry] = []
     extraction_method: str = "regex"
+    validation_results: list[FieldValidationResult] = []
+    image_width: Optional[int] = None
+    image_height: Optional[int] = None
 
 
 class OcrPreviewResponse(BaseModel):

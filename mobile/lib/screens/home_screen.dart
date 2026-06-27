@@ -1,3 +1,4 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/scan_record.dart';
@@ -19,14 +20,30 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   List<ScanRecord> _records = [];
   String _operatorName = '';
+  bool _isOnline = true;
+
+  late final Stream<List<ConnectivityResult>> _connectivityStream;
 
   @override
   void initState() {
     super.initState();
     _load();
     _loadOperatorName();
-    // Reload whenever a background sync completes
     context.read<SyncService>().syncCount.addListener(_load);
+
+    _connectivityStream = Connectivity().onConnectivityChanged;
+    _connectivityStream.listen((results) {
+      final online = results.any((r) => r != ConnectivityResult.none);
+      if (mounted) setState(() => _isOnline = online);
+      if (online) context.read<SyncService>().syncPending();
+    });
+
+    // Check current status once on startup
+    Connectivity().checkConnectivity().then((results) {
+      if (mounted) {
+        setState(() => _isOnline = results.any((r) => r != ConnectivityResult.none));
+      }
+    });
   }
 
   @override
@@ -155,17 +172,48 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: _records.isEmpty
-          ? const _EmptyState()
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: ListView.separated(
-                padding: const EdgeInsets.all(16),
-                itemCount: _records.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 8),
-                itemBuilder: (context, i) => ScanTile(record: _records[i]),
+      body: Column(
+        children: [
+          // Offline banner
+          if (!_isOnline)
+            Container(
+              width: double.infinity,
+              color: const Color(0xFF7C2D12),
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+              child: Row(
+                children: [
+                  const Icon(Icons.wifi_off, size: 14, color: Colors.orange),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Offline — scans will sync automatically when connected',
+                      style: TextStyle(color: Colors.orange, fontSize: 12),
+                    ),
+                  ),
+                  if (_records.any((r) => r.status == SyncStatus.pendingSync))
+                    Text(
+                      '${_records.where((r) => r.status == SyncStatus.pendingSync).length} queued',
+                      style: const TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                ],
               ),
             ),
+
+          Expanded(
+            child: _records.isEmpty
+                ? const _EmptyState()
+                : RefreshIndicator(
+                    onRefresh: _load,
+                    child: ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: _records.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, i) => ScanTile(record: _records[i]),
+                    ),
+                  ),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
           await Navigator.push(

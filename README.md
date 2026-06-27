@@ -1,59 +1,187 @@
 # FlashPort
 
-**Snap. Extract. Declare.**
+> **Snap. Extract. Declare.**
+> AI-powered customs declaration automation for Cikarang Dry Port.
 
-An AI-powered customs declaration automation platform built for Cikarang Dry Port.
-
-> AI Open Innovation Challenge 2026 — Case 1: Creating Customs Declaration with OCR
-> Team: Teknik Logistik | President University
+AI Open Innovation Challenge 2026 — Case 1 | Team: Teknik Logistik, President University
 
 ---
 
-## What It Does
+## The Problem
 
-FlashPort eliminates manual customs declaration preparation for Indonesian importers and exporters. A field operator photographs a trade document (Bill of Lading, Commercial Invoice, Packing List) on a Flutter mobile app — even with zero internet. The backend extracts all required CEISA fields using Tesseract OCR, scores the declaration for rejection risk, and the manager reviews and submits through a professional web dashboard.
+Field operators at Cikarang Dry Port spend 2–4 hours manually transcribing data from trade documents into the CEISA customs system. Errors lead to Jalur Merah (Red Lane) rejections, delays, and demurrage costs.
 
-**Before FlashPort:** 2–4 hours, manual data entry, high CEISA rejection rate.
-**After FlashPort:** Under 3 minutes, AI-extracted, pre-submission risk scored.
+**FlashPort cuts that to under 3 minutes** — a mobile camera scan triggers a full AI pipeline that extracts, validates, and pre-scores every declaration before the manager even opens the dashboard.
+
+---
+
+## How It Works
+
+```
+Operator photographs         Backend processes            Manager reviews
+a trade document      →      in seconds            →      and submits
+(offline-capable)
+                             OCR (Tesseract)
+                             ↓
+                             spaCy NER
+                             ↓
+                             Keyword proximity extraction
+                             ↓
+                             Regex fallback
+                             ↓
+                             XGBoost risk score + SHAP
+                             ↓
+                             WebSocket → live dashboard
+```
+
+1. Operator opens the Flutter app, selects document type, and photographs a Bill of Lading, Commercial Invoice, or Packing List — even with no internet.
+2. The document is queued in SQLite and auto-syncs when the network returns.
+3. The backend runs Tesseract OCR, preprocesses with OpenCV, then passes the text through a 3-stage extraction pipeline driven by a live database of field definitions.
+4. XGBoost scores the declaration 0–100 for CEISA rejection risk. SHAP explains every point added or removed.
+5. The web dashboard receives the record instantly via WebSocket. The manager reviews, edits fields, approves or rejects.
+6. On approval, the declaration is submitted to CEISA. The operator receives a push notification with the result.
+
+---
+
+## Key Capabilities
+
+**AI Extraction**
+- 3-stage pipeline: spaCy NER → keyword proximity → regex fallback
+- 27 built-in fields across all 3 document types, with per-doc-type scoping (Bill of Lading is never penalised for missing Invoice Value)
+- Admin-configurable: add new fields, keywords, and risk weights from the dashboard — no code changes needed
+
+**Risk Scoring**
+- XGBoost classifier trained on 6,000 synthetic declarations — 93.7% cross-validation accuracy, 100% red lane recall
+- SHAP explainability returned with every prediction: each feature's contribution shown as a bar chart
+- Watchlist auto-elevates risk for flagged importers, exporters, or HS codes
+- Manager-configured rules for custom field/condition/boost logic
+
+**Manager Dashboard**
+- Live WebSocket feed — new declarations appear instantly
+- Full-resolution document image beside the extracted fields
+- Inline field editing, approve/reject with note, batch CEISA submission
+- Field Schema page: add or reconfigure extraction fields without touching code
+- SLA monitoring, audit trail, operator management, CSV export
+
+**Mobile**
+- Offline-first: camera capture queues locally, syncs automatically
+- 4-step status timeline per scan: Scanned → Synced → Reviewed → Approved/Rejected
+- FCM push notifications for every review decision
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  MOBILE (Flutter)        BACKEND (FastAPI)      WEB (React)      │
-│                                                                  │
-│  📷 Camera / File    →   OpenCV Preprocess   →  Admin Dashboard  │
-│  Offline SQLite      →   Tesseract OCR       →  Approve/Reject   │
-│  Auto-sync           →   Regex Extractor     →  CEISA Submit     │
-│  FCM Notifications   →   Risk Scorer         →  Audit Trail      │
-│                      →   Watchlist Check     →  SLA Monitoring   │
-│                      →   PostgreSQL          →  Export / Reports  │
-└──────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  MOBILE (Flutter)       BACKEND (FastAPI)       WEB (React)     │
+│                                                                 │
+│  Camera / File      →   OpenCV + Tesseract  →   Dashboard       │
+│  Offline SQLite     →   3-stage Extractor   →   Detail Panel    │
+│  Auto-sync          →   XGBoost + SHAP      →   Field Schema    │
+│  FCM Notifications  →   Watchlist / Rules   →   CEISA Portal    │
+│                     →   PostgreSQL          →   Audit Trail      │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Three-Layer Pipeline
+| Layer | Technology |
+|---|---|
+| Mobile | Flutter 3.x + Dart — iOS + Android |
+| Backend | Python 3.11 + FastAPI — 42 REST endpoints + WebSocket |
+| OCR | Tesseract `eng+ind` + OpenCV preprocessing |
+| Field extraction | spaCy NER → keyword proximity (DB-driven) → regex fallback |
+| Risk scoring | XGBoost 400 trees · 93.7% CV accuracy · SHAP explainability |
+| Database | PostgreSQL 15 — stores documents, fields, audit logs, field definitions |
+| Web | React 18 + Tailwind CSS 3 |
+| Auth | JWT HS256 (manager) + API Key (mobile) |
+| Push | Firebase FCM HTTP v1 |
 
-| Layer | Tech | Role |
+---
+
+## Document Fields
+
+| Document Type | Fields Extracted |
+|---|---|
+| **All types** | Importer, Exporter, Container ID, Description of Goods |
+| **Commercial Invoice** | HS Code, Invoice Value, Invoice Number, Invoice Date, Country of Origin, Quantity, Unit Price, Incoterms, Payment Terms, Port of Discharge |
+| **Bill of Lading** | B/L Number, Vessel Name, Port of Loading, Port of Discharge, Voyage Number, Seal Number, ETA, Freight Terms |
+| **Packing List** | Net Weight, Gross Weight, Carton Count, CBM, Package Type, Marks & Numbers |
+
+Each field has an `extraction_keywords` list covering English, Bahasa Indonesia, and common abbreviations (avg 14 keywords per field). Admins can add or edit fields from the **Field Schema** page without redeploying.
+
+---
+
+## CEISA Risk Lanes
+
+| Lane | Score | Outcome |
 |---|---|---|
-| Mobile | Flutter + SQLite | Offline document capture, auto-sync, status timeline |
-| Backend | FastAPI + Tesseract + OpenCV | Server-side OCR, extraction, risk scoring, all business logic |
-| Web | React + Tailwind CSS | Pro admin dashboard — review, approve/reject, CEISA submit, reports |
-| Database | PostgreSQL | All data including stored document images |
-| Gateway | Mock CEISA (FastAPI) | Green/Yellow/Red lane simulation |
+| 🟢 Green | < 30 | Auto-clearance — immediate release |
+| 🟡 Yellow | 30–69 | Document verification required |
+| 🔴 Red | ≥ 70 | Physical inspection — held at port |
 
-### How It Works
+---
 
-1. **Operator scans** a trade document with the Flutter camera or attaches a file — completely offline
-2. **App saves** to local SQLite as `Pending` — shows in scan history immediately
-3. **On network restore**, auto-sync sends compressed image to backend
-4. **Backend runs Tesseract** OCR; OpenCV preprocesses (grayscale, threshold, deskew)
-5. **Regex engine** extracts HS Code, Invoice Value, Container ID, Importer/Exporter, etc.
-6. **Risk scorer** generates 0–100% risk score, checks against watchlist and custom rules
-7. **Web dashboard** receives the record live via WebSocket — manager reviews, approves or rejects
-8. **On approve/reject**, FCM push notification sent to the operator's mobile device
-9. **Manager submits** approved declarations to the mock CEISA gateway — Green/Yellow/Red lane response
+## Quick Start
+
+### Prerequisites
+
+- PostgreSQL 15 (`brew install postgresql@15`)
+- Python 3.11+, Node.js 18+, Flutter 3.x
+- Tesseract OCR (`brew install tesseract`)
+
+### 1 — Database
+
+```bash
+psql postgres -c "CREATE USER flashport WITH PASSWORD 'flashport';"
+psql postgres -c "CREATE DATABASE flashport OWNER flashport;"
+psql -U flashport -d flashport -f docker/postgres/init.sql
+```
+
+### 2 — Backend
+
+```bash
+cd backend
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+
+# Train the AI models (≈ 2 min)
+python scripts/generate_training_data.py
+python scripts/train_risk_model.py
+python scripts/generate_ner_training.py
+python scripts/train_ner_model.py
+
+# Start
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+On first start the backend seeds operators, validation rules, and all 27 field definitions automatically.
+
+### 3 — Web Dashboard
+
+```bash
+cd web
+npm install && npm run dev
+# → http://localhost:3000
+```
+
+Login: `manager` / `flashport2026`
+
+### 4 — Mobile
+
+```bash
+cd mobile
+flutter pub get && flutter run
+```
+
+| Employee ID | PIN |
+|---|---|
+| CDP-001 | 1234 |
+| CDP-002 | 5678 |
+| CDP-003 | 9012 |
+
+> **Physical device:** set Server URL in the login screen to `http://[YOUR-MAC-IP]:8000`
+> Find your IP: `ipconfig getifaddr en0`
 
 ---
 
@@ -61,33 +189,53 @@ FlashPort eliminates manual customs declaration preparation for Indonesian impor
 
 ```
 flashport/
-├── mobile/                 Flutter app (iOS + Android)
-│   ├── lib/
-│   │   ├── screens/        camera, preview, result, home, login
-│   │   ├── services/       sync, database, operator, backend_config
-│   │   ├── models/         scan_record
-│   │   └── widgets/        scan_tile (status timeline)
-│   └── pubspec.yaml
+├── mobile/
+│   └── lib/
+│       ├── screens/        camera, preview, result, home, login
+│       ├── services/       sync, database, operator, backend_config
+│       ├── models/         scan_record
+│       └── widgets/        scan_tile
 │
-├── backend/                FastAPI Python server
+├── backend/
 │   ├── app/
-│   │   ├── api/            38 routes across 12 routers
-│   │   ├── models/         7 SQLAlchemy models
-│   │   ├── services/       OCR, extractor, risk scorer, FCM, audit
-│   │   └── core/           CEISA gateway simulation
-│   └── requirements.txt
+│   │   ├── api/            42 routes across 14 routers
+│   │   ├── models/         9 SQLAlchemy models
+│   │   ├── services/       ocr, extractor, validator, risk_scorer, fcm, audit
+│   │   └── core/           ceisa_gateway (mock)
+│   ├── scripts/            generate_training_data.py · train_risk_model.py
+│   │                       generate_ner_training.py · train_ner_model.py
+│   ├── data/               training_declarations.csv · sample_docs/
+│   └── models/             risk_model.xgb · ner_model/
 │
-├── web/                    React 18 + Tailwind CSS admin dashboard
+├── web/
 │   └── src/
-│       ├── components/     15 components (sidebar, table, detail panel, all views)
-│       └── hooks/          useAuth, useDeclarations, useAPI, useCeisaSubmissions
+│       ├── components/     19 components
+│       └── hooks/          useAuth · useDeclarations · useFieldDefs · useAPI
 │
-├── docker/
-│   └── postgres/init.sql   Full schema
-├── CLAUDE.md               Developer context for AI assistants
-├── SYSTEM_BREAKDOWN.md     Technical implementation plan
-└── README.md               This file
+├── docs/                   System Breakdown · Proposal · How It Works
+├── CLAUDE.md               Developer context
+└── README.md
 ```
+
+---
+
+## API
+
+Full interactive docs at `http://localhost:8000/docs`
+
+| Group | Routes |
+|---|---|
+| Auth | `POST /auth/login` · `/auth/operator/login` |
+| Sync | `POST /sync` |
+| Declarations | `GET · PATCH · POST /declarations/{id}` |
+| CEISA | `POST /ceisa/submit` · `/ceisa/batch-submit` · `GET /ceisa/submissions` |
+| Field Definitions | `GET · POST · PATCH · DELETE /field-definitions` |
+| Field Validation | `GET · POST · PATCH · DELETE /field-validation-rules` |
+| Operators | `GET · POST · PATCH · DELETE /operators` |
+| Watchlist | `GET · POST · DELETE /watchlist` |
+| Risk Rules | `GET · POST · PATCH · DELETE /risk-rules` |
+| HS Codes | `GET · POST · DELETE /hs-codes` · `GET /hs-codes/validate/{code}` |
+| Reports | `GET /sla` · `GET /audit` · `GET /export/declarations.csv` |
 
 ---
 
@@ -102,177 +250,4 @@ flashport/
 
 ---
 
-## Quick Start (After Cloning)
-
-> **Note:** The AI models and sample documents are not included in the repo (too large).
-> Run the generation scripts below first — they take about 3 minutes total.
-
-### Prerequisites
-
-- PostgreSQL 15 (local install via Homebrew or pgAdmin)
-- Flutter 3.x
-- Node.js 18+
-- Python 3.11+
-- Tesseract OCR (`brew install tesseract`)
-
-### Step 1 — Database Setup
-
-```bash
-psql postgres -c "CREATE USER flashport WITH PASSWORD 'flashport';"
-psql postgres -c "CREATE DATABASE flashport OWNER flashport;"
-psql -U flashport -d flashport -f docker/postgres/init.sql
-```
-
-### Step 2 — Backend + Generate AI Models
-
-```bash
-cd backend
-python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-python -m spacy download en_core_web_sm
-
-# Generate training data and train both AI models (~2 min)
-python scripts/generate_training_data.py
-python scripts/train_risk_model.py
-python scripts/generate_ner_training.py
-python scripts/train_ner_model.py
-
-# Generate sample documents — 100 PDFs + 100 PNGs per type (~3 min, optional)
-python scripts/generate_sample_docs.py
-
-# Start the backend
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### Step 3 — Web Dashboard
-
-```bash
-cd web
-npm install
-npm run dev
-# Opens at http://localhost:3000
-```
-
-**Manager login:** `manager` / `flashport2026`
-
-### Step 4 — Mobile
-
-```bash
-cd mobile
-flutter pub get
-flutter run
-```
-
-**Mobile operator logins:**
-
-| Employee ID | PIN |
-|---|---|
-| CDP-001 | 1234 |
-| CDP-002 | 5678 |
-| CDP-003 | 9012 |
-
-> **Physical device:** In the app login screen, set Server URL to `http://[YOUR-MAC-IP]:8000`
-> Find your IP with: `ipconfig getifaddr en0`
-
-Services:
-- Backend API: `http://localhost:8000`
-- API Docs: `http://localhost:8000/docs`
-- Web Dashboard: `http://localhost:3000`
-
----
-
-## Document Types Supported
-
-| Document | Key Fields Extracted |
-|---|---|
-| Commercial Invoice | HS Code, Invoice Value, Invoice No., Importer, Exporter |
-| Packing List | Net Weight, Gross Weight, Carton Count |
-| Bill of Lading | Container ID, Vessel Name, Port of Origin |
-
----
-
-## CEISA Lane Response Guide
-
-| Lane | Condition | Action |
-|---|---|---|
-| Green Lane | Data verified, risk < 30% | Immediate release |
-| Yellow Lane | Incomplete fields, risk 30–70% | Held — document verification |
-| Red Lane | High risk > 70% or anomaly | Physical inspection |
-
----
-
-## API Overview
-
-| Group | Endpoints | Description |
-|---|---|---|
-| Auth | `POST /auth/login` | Manager JWT login |
-| Sync | `POST /sync` | Mobile document sync |
-| Declarations | `GET/PATCH /declarations` | List, review, reprocess |
-| CEISA | `POST /ceisa/submit`, `/batch-submit` | Single and batch submission |
-| Operators | `GET/POST/PATCH/DELETE /operators` | Field operator management |
-| Watchlist | `GET/POST/DELETE /watchlist` | Flag risky entities |
-| Risk Rules | `GET/POST/PATCH/DELETE /risk-rules` | Custom scoring rules |
-| HS Codes | `GET /hs-codes/validate/{code}` | HS code validation |
-| SLA | `GET /sla` | Processing time metrics |
-| Audit | `GET /audit` | Full action history |
-| Export | `GET /export/declarations.csv` | CSV export |
-
-Full interactive docs: `http://localhost:8000/docs`
-
----
-
-## Development Roadmap
-
-### Phase 1 — Core Platform ✅ Complete
-
-| Feature | Status |
-|---|---|
-| Flutter mobile — offline capture, SQLite queue, auto-sync | ✅ |
-| FastAPI backend — Tesseract OCR + OpenCV preprocessing | ✅ |
-| Regex field extractor (HS Code, Invoice Value, Container ID, etc.) | ✅ |
-| Rule-based + configurable risk scorer | ✅ |
-| Mock CEISA H2H gateway (Green/Yellow/Red lane) | ✅ |
-| Professional React admin dashboard (sidebar, table, detail panel) | ✅ |
-| Approve / Reject workflow with manager notes | ✅ |
-| Operator management (add, deactivate, reset PIN) | ✅ |
-| Watchlist — auto-flag risky importers/exporters/HS codes | ✅ |
-| Custom risk rules — configurable field/condition/boost | ✅ |
-| HS Code reference database + validator | ✅ |
-| SLA Dashboard — overdue alerts, daily throughput | ✅ |
-| Full audit trail — every action logged | ✅ |
-| CSV export with filters | ✅ |
-| Batch CEISA submission | ✅ |
-| Re-run OCR on stored document | ✅ |
-| PDF document upload + multi-page OCR | ✅ |
-| Document image stored in PostgreSQL | ✅ |
-| Firebase push notifications (approve/reject + CEISA result) | ✅ (needs FCM JSON) |
-| Mobile scan history with status timeline | ✅ |
-
-### Phase 2 — Live Integration (by 31 August 2026)
-
-| Feature | Status |
-|---|---|
-| Real CEISA H2H API integration (credentials from company visit July 27–31) | 🔲 After visit |
-| XGBoost risk scorer trained on real CEISA rejection data | 🔲 After visit |
-| Firebase FCM service account JSON configured | 🔲 Manual step |
-
----
-
-## Tech Stack (100% Free & Open Source)
-
-| Component | Technology |
-|---|---|
-| Mobile | Flutter 3.x + Dart |
-| Mobile OCR | None — all OCR runs on backend (Tesseract) |
-| Backend | Python 3.11 + FastAPI |
-| PDF text extraction | pypdf — reads digital PDFs directly, no OCR needed |
-| OCR engine | Tesseract `eng+ind` — for photo/scanned documents |
-| Image preprocessing | OpenCV — smart pipeline (grayscale only for clean images) |
-| Field extraction Stage 1 | spaCy NER (custom trained, 100% F1, English + Indonesian) |
-| Field extraction Stage 2 | Python Regex — fallback + table-merge OCR patterns |
-| Risk scoring | XGBoost (300 trees, 89.5% CV accuracy) |
-| Explainability | SHAP TreeExplainer — per-feature contribution bar chart |
-| Database | PostgreSQL 15 (local install) |
-| Web frontend | React 18 + Tailwind CSS 3 |
-| Push notifications | Firebase Cloud Messaging FCM HTTP v1 |
-| Auth | JWT HS256 + API Key |
+*Built for the AI Open Innovation Challenge 2026 — Cikarang Dry Port, Indonesia.*
